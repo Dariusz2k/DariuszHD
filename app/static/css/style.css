@@ -1,0 +1,41 @@
+/* HomeRun Clone Styles */
+.signal-meter {
+    height: 10px;
+    background-color: #e9ecef;
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+.signal-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #dc3545 0%, #ffc107 50%, #28a745 100%);
+    transition: width 0.3s ease;
+}
+
+.channel-item.active {
+    background-color: #007bff !important;
+    color: white;
+}
+
+#videoContainer {
+    background-color: #000;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.card {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
+
+.status-connected {
+    background-color: #28a745 !important;
+}
+
+.status-disconnected {
+    background-color: #dc3545 !important;
+}

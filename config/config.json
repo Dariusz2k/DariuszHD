@@ -1,0 +1,21 @@
+{
+  "device": {
+    "path": "/dev/video0",
+    "name": "Hauppauge WinTV-dualHD"
+  },
+  "streaming": {
+    "port": 8000,
+    "format": "mpegts",
+    "video_codec": "libx264",
+    "audio_codec": "aac"
+  },
+  "web": {
+    "port": 5000,
+    "host": "0.0.0.0"
+  },
+  "jellyfin": {
+    "enabled": false,
+    "url": "",
+    "api_key": ""
+  }
+}
