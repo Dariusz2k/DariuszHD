@@ -751,7 +751,9 @@ class TVTuner:
             "-hide_banner",
             "-loglevel", "info",
             "-f", "mpegts",  # Explicitly specify MPEG-TS format
-            "-fflags", "+discardcorrupt+genpts+igndts",  # Discard corrupt packets, ignore DTS
+            "-fflags", "+discardcorrupt+genpts",  # Discard corrupt packets, generate PTS
+            "-analyzeduration", "2000000",  # 2 seconds to probe stream (reduced from 5s)
+            "-probesize", "5000000",  # 5MB probe size (reduced from 10MB)
             "-i", "pipe:0",  # Read from stdin (connected to cat's stdout)
             "-c", "copy",  # Stream copy - no re-encoding!
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
