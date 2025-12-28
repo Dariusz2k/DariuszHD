@@ -164,7 +164,7 @@ class TVTuner:
 
                     # If no vchan extracted, skip (we still keep raw name if you want later)
                     if vchan:
-                        if frequency_filter and (freq_khz is None or freq_khz not in frequency_filter):
+                        if frequency_filter and freq_khz is not None and freq_khz not in frequency_filter:
                             continue
                         # Clean name to station-ish string (optional)
                         display = name
@@ -291,14 +291,16 @@ class TVTuner:
         self.scan_proc = None
         result = self.scan_channels(xml_path, self.scan_frequency_set or None)
         if result.get("success"):
+            result_channels_found = result.get("channels_found", 0)
+            total_found = max(channels_found, result_channels_found)
             self.scan_status = {"status": "complete"}
-            self._emit_scan_progress(frequency_khz, result.get("channels_found", 0), 100)
+            self._emit_scan_progress(frequency_khz, total_found, 100)
             result["channels"] = self.channels
             socketio.emit(
                 "scan_complete",
                 {
                     "success": True,
-                    "channels_found": result.get("channels_found", 0),
+                    "channels_found": total_found,
                     "channels": self.channels,
                 },
             )
