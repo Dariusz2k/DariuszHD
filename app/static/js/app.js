@@ -188,6 +188,8 @@ function updateThresholdValue() {
 function startFullScan() {
     const threshold = parseInt(document.getElementById('signalThreshold').value);
     const identifyNames = document.getElementById('identifyNames').checked;
+    const selectedRegions = Array.from(document.querySelectorAll('input[name="scanRegions"]:checked'))
+        .map((input) => input.value);
 
     // Show progress UI
     document.getElementById('scanProgress').style.display = 'block';
@@ -223,7 +225,8 @@ function startFullScan() {
         body: JSON.stringify({
             signal_threshold: threshold,
             identify_names: identifyNames,
-            background: true
+            background: true,
+            regions: selectedRegions
         })
     })
     .then(response => response.json())
@@ -242,7 +245,8 @@ function startFullScan() {
                     identify_names: identifyNames,
                     background: true,
                     force: true,
-                    keep_channels: document.getElementById('keepChannelsOnCancel').checked
+                    keep_channels: document.getElementById('keepChannelsOnCancel').checked,
+                    regions: selectedRegions
                 })
             }).then(response => response.json());
         }
@@ -492,4 +496,32 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize signal threshold slider
     document.getElementById('signalThreshold').addEventListener('input', updateThresholdValue);
     updateThresholdValue();
+
+    loadScanRegions();
 });
+
+async function loadScanRegions() {
+    try {
+        const response = await fetch('/api/scan/regions');
+        if (!response.ok) {
+            return;
+        }
+        const data = await response.json();
+        const container = document.getElementById('scanRegionOptions');
+        if (!container) {
+            return;
+        }
+        if (!data.regions || data.regions.length === 0) {
+            container.innerHTML = '<small class="text-muted">No regions available.</small>';
+            return;
+        }
+        container.innerHTML = data.regions.map((region) => `
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="scanRegions" id="region-${region.id}" value="${region.id}">
+                <label class="form-check-label" for="region-${region.id}">${region.name}</label>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Failed to load scan regions:', error);
+    }
+}

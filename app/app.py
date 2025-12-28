@@ -8,12 +8,14 @@ import threading
 import time
 import signal
 import re
+import bisect
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'homerun-clone-secret-key'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 CHANNELS_JSON = "/opt/homerun-clone/config/channels.json"
+REGION_DATA_PATH = os.path.join(os.path.dirname(__file__), "scan_regions.json")
 
 class TVTuner:
     """
@@ -42,6 +44,9 @@ class TVTuner:
         self.scan_cancel = threading.Event()
         self.scan_lock = threading.Lock()
         self.keep_partial_scan = False
+        self.scan_region_ids = []
+        self.scan_frequency_list = []
+        self.scan_frequency_set = set()
 
     # -------------------------
     # Channels: load/save/sort
@@ -78,6 +83,24 @@ class TVTuner:
     # -------------------------
     # Scan using w_scan
     # -------------------------
+    def _load_regions(self):
+        if not os.path.exists(REGION_DATA_PATH):
+            return []
+        with open(REGION_DATA_PATH, "r") as f:
+            return json.load(f)
+
+    def _get_region_frequencies(self, region_ids):
+        regions = self._load_regions()
+        freq_set = set()
+        for region in regions:
+            if region.get("id") in region_ids:
+                for freq in region.get("frequencies_khz", []):
+                    try:
+                        freq_set.add(int(freq))
+                    except (TypeError, ValueError):
+                        continue
+        return sorted(freq_set)
+
     def _get_adapter_index(self):
         env_adapter = os.environ.get("HOMERUN_ADAPTER")
         if env_adapter is not None:
@@ -91,7 +114,7 @@ class TVTuner:
             return int(match.group(1))
         return 0
 
-    def scan_channels(self, xml_path):
+    def scan_channels(self, xml_path, frequency_filter=None):
         """
         Parse w_scan XML output and extract channels into channels.json.
         We'll parse the generated XML enough to get virtual channel + name.
@@ -111,6 +134,7 @@ class TVTuner:
                 if ch.tag.lower().endswith("channel"):
                     name = None
                     vchan = None
+                    freq_khz = None
                     # Look for children like <name>, <service_name>, <channel_name>
                     for c in list(ch):
                         tag = c.tag.lower()
@@ -121,6 +145,11 @@ class TVTuner:
                             # Don't overwrite if we already set a more specific field
                             if name is None:
                                 name = txt
+                        if "frequency" in tag or tag.endswith("freq"):
+                            try:
+                                freq_khz = int(float(txt))
+                            except ValueError:
+                                pass
                         if "channel" in tag and ("major" in tag or "minor" in tag):
                             # some formats split major/minor; handled below
                             pass
@@ -135,9 +164,11 @@ class TVTuner:
 
                     # If no vchan extracted, skip (we still keep raw name if you want later)
                     if vchan:
+                        if frequency_filter and (freq_khz is None or freq_khz not in frequency_filter):
+                            continue
                         # Clean name to station-ish string (optional)
                         display = name
-                        new_channels[vchan] = {"name": display}
+                        new_channels[vchan] = {"name": display, "frequency_khz": freq_khz}
 
         except Exception as e:
             return {"success": False, "error": f"XML parse failed: {e}"}
@@ -183,6 +214,7 @@ class TVTuner:
             stderr_output = []
             freq_min_khz = 54000
             freq_max_khz = 858000
+            active_frequencies = self.scan_frequency_list
 
             try:
                 with open(xml_path, "w") as xml_file:
@@ -203,15 +235,19 @@ class TVTuner:
                             match = re.search(r"(\d+):", line)
                             if match:
                                 frequency_khz = int(match.group(1))
-                                progress = int(
-                                    max(
-                                        0,
-                                        min(
-                                            100,
-                                            ((frequency_khz - freq_min_khz) / (freq_max_khz - freq_min_khz)) * 100,
-                                        ),
+                                if active_frequencies:
+                                    index = bisect.bisect_right(active_frequencies, frequency_khz)
+                                    progress = int((index / len(active_frequencies)) * 100)
+                                else:
+                                    progress = int(
+                                        max(
+                                            0,
+                                            min(
+                                                100,
+                                                ((frequency_khz - freq_min_khz) / (freq_max_khz - freq_min_khz)) * 100,
+                                            ),
+                                        )
                                     )
-                                )
                                 if "signal ok" in line:
                                     channels_found += 1
                                 self._emit_scan_progress(frequency_khz, channels_found, progress)
@@ -224,7 +260,7 @@ class TVTuner:
             self.scan_status = {"status": "canceled"}
             self.scan_proc = None
             if self.keep_partial_scan:
-                result = self.scan_channels(xml_path)
+                result = self.scan_channels(xml_path, self.scan_frequency_set or None)
                 if result.get("success"):
                     self.scan_status = {
                         "status": "canceled",
@@ -253,7 +289,7 @@ class TVTuner:
             return {"success": False, "error": stderr_text or "w_scan failed"}
 
         self.scan_proc = None
-        result = self.scan_channels(xml_path)
+        result = self.scan_channels(xml_path, self.scan_frequency_set or None)
         if result.get("success"):
             self.scan_status = {"status": "complete"}
             self._emit_scan_progress(frequency_khz, result.get("channels_found", 0), 100)
@@ -426,6 +462,10 @@ def api_status():
         "scan_status": tuner.scan_status,
     })
 
+@app.route("/api/scan/regions")
+def api_scan_regions():
+    return jsonify({"regions": tuner._load_regions()})
+
 @app.route("/favicon.ico")
 def favicon():
     return ("", 204)
@@ -436,6 +476,7 @@ def api_scan():
     background = payload.get("background", False)
     force = payload.get("force", False)
     keep_channels = payload.get("keep_channels", False)
+    region_ids = payload.get("regions", [])
     if tuner.is_scan_active() and not force:
         return jsonify({
             "success": False,
@@ -445,6 +486,9 @@ def api_scan():
     if tuner.is_scan_active() and force:
         tuner.cancel_scan(keep_channels=keep_channels)
     tuner.keep_partial_scan = False
+    tuner.scan_region_ids = region_ids
+    tuner.scan_frequency_list = tuner._get_region_frequencies(region_ids)
+    tuner.scan_frequency_set = set(tuner.scan_frequency_list)
     if background:
         thread = threading.Thread(target=tuner.run_scan, daemon=True)
         thread.start()
