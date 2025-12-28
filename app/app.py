@@ -642,72 +642,170 @@ class TVTuner:
         self.ffmpeg_proc = None
 
     def start_stream(self, channel):
-        if not self.tune_channel(channel):
+        """
+        Stream a channel using ffmpeg with piped input from azap.
+        This eliminates DVR device issues by piping azap output directly to ffmpeg.
+        """
+        # Stop any existing processes
+        self.stop_stream()
+        self.stop_zap()
+
+        # Verify channel exists
+        if channel not in self.channels:
+            logger.error(f"[STREAM] Channel {channel} not found")
             return False
 
-        # Wait for azap to fully lock the tuner and DVR device to start streaming
-        logger.info("[STREAM] Waiting for tuner to stabilize and DVR device to start streaming...")
-        logger.info("[STREAM] This may take 5-10 seconds...")
-        time.sleep(5)
+        # Get station name and zap file
+        station_name = self.channels[channel].get("name", "")
+        zap_path = os.path.join(CONFIG_DIR, "channels.zap")
 
-        # Kill old ffmpeg; start new one that writes HLS to a temp directory
-        self.stop_stream()
+        if not os.path.exists(zap_path):
+            logger.error(f"[STREAM] channels.zap not found at {zap_path}")
+            return False
+
+        # Find zap entry
+        entry_name = self._find_zap_entry_by_name(zap_path, station_name)
+        if not entry_name:
+            logger.error(f"[STREAM] Could not find zap entry for {station_name}")
+            return False
+
+        logger.info("="*70)
+        logger.info(f"[STREAM] Starting stream for channel {channel} ({station_name})")
+        logger.info(f"[STREAM] Using zap entry: {entry_name}")
+
+        # Extract adapter number
+        import re
+        adapter_match = re.search(r'adapter(\d+)', self.frontend)
+        adapter_num = adapter_match.group(1) if adapter_match else "0"
 
         # Create HLS output directory
         hls_dir = os.path.join(CONFIG_DIR, "hls")
         os.makedirs(hls_dir, exist_ok=True)
         hls_playlist = os.path.join(hls_dir, "stream.m3u8")
 
-        logger.info(f"[STREAM] Starting ffmpeg to read from {self.dvr}")
-        logger.info(f"[STREAM] HLS output: {hls_playlist}")
+        # Clean up old HLS files
+        import glob
+        for old_file in glob.glob(os.path.join(hls_dir, "stream*.ts")) + glob.glob(os.path.join(hls_dir, "*.m3u8")):
+            try:
+                os.remove(old_file)
+            except:
+                pass
 
-        cmd = [
+        # Start azap with output to stdout (remove -r to avoid DVR device, use -p for PAT/PMT)
+        azap_cmd = [
+            "azap",
+            "-a", adapter_num,
+            "-c", zap_path,
+            "-p",  # PAT/PMT processing
+            entry_name
+        ]
+
+        logger.info(f"[STREAM] Starting azap: {' '.join(azap_cmd)}")
+        self.zap_proc = subprocess.Popen(
+            azap_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False  # Binary mode for stream data
+        )
+
+        # Wait for azap to tune and lock (check stderr for "lock" message)
+        logger.info("[STREAM] Waiting for azap to lock to channel...")
+        time.sleep(2)
+
+        if self.zap_proc.poll() is not None:
+            stdout, stderr = self.zap_proc.communicate()
+            logger.error(f"[STREAM] azap died immediately with code {self.zap_proc.returncode}")
+            logger.error(f"[STREAM] stderr: {stderr.decode() if stderr else 'none'}")
+            self.zap_proc = None
+            return False
+
+        # Start ffmpeg reading from azap's stdout via pipe
+        ffmpeg_cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "info",  # Changed from error to info for debugging
-            "-i", self.dvr,
-            "-c", "copy",
+            "-loglevel", "info",
+            "-f", "mpegts",  # Explicitly specify MPEG-TS format
+            "-i", "pipe:0",  # Read from stdin (will be connected to azap's stdout)
+            "-c:v", "copy",  # Copy video codec
+            "-c:a", "copy",  # Copy audio codec
             "-f", "hls",
             "-hls_time", "2",
-            "-hls_list_size", "3",
-            "-hls_flags", "delete_segments",
+            "-hls_list_size", "5",
+            "-hls_flags", "delete_segments+append_list",
+            "-hls_segment_filename", os.path.join(hls_dir, "stream%d.ts"),
             hls_playlist
         ]
 
-        logger.info(f"[STREAM] ffmpeg command: {' '.join(cmd)}")
-        self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        logger.info(f"[STREAM] Starting ffmpeg: {' '.join(ffmpeg_cmd)}")
+        logger.info("[STREAM] Piping azap stdout -> ffmpeg stdin")
 
-        # Wait a moment and check if ffmpeg is still running
-        time.sleep(1)
+        self.ffmpeg_proc = subprocess.Popen(
+            ffmpeg_cmd,
+            stdin=self.zap_proc.stdout,  # Connect to azap's stdout
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        # Allow azap to write to pipe (close our reference)
+        if self.zap_proc.stdout:
+            self.zap_proc.stdout.close()
+
+        # Start a thread to monitor ffmpeg stderr
+        def monitor_ffmpeg():
+            if self.ffmpeg_proc and self.ffmpeg_proc.stderr:
+                for line in self.ffmpeg_proc.stderr:
+                    logger.info(f"[FFMPEG] {line.strip()}")
+
+        ffmpeg_monitor = threading.Thread(target=monitor_ffmpeg, daemon=True)
+        ffmpeg_monitor.start()
+
+        # Wait for ffmpeg to start processing
+        time.sleep(3)
+
         if self.ffmpeg_proc.poll() is not None:
-            stdout, stderr = self.ffmpeg_proc.communicate()
-            logger.error(f"[STREAM] ffmpeg died immediately with code {self.ffmpeg_proc.returncode}")
-            logger.error(f"[STREAM] stdout: {stdout}")
-            logger.error(f"[STREAM] stderr: {stderr}")
+            logger.error(f"[STREAM] ffmpeg died with code {self.ffmpeg_proc.returncode}")
             self.ffmpeg_proc = None
+            self.stop_zap()
             return False
 
-        logger.info("[STREAM] ffmpeg started successfully and is running")
+        logger.info("[STREAM] ffmpeg started successfully")
         logger.info(f"[STREAM] Waiting for HLS playlist to be created...")
 
         # Wait for the playlist file to be created and have valid content
-        max_wait = 10  # Maximum 10 seconds
+        max_wait = 15  # Increased to 15 seconds
         for i in range(max_wait):
             if os.path.exists(hls_playlist):
                 try:
                     with open(hls_playlist, 'r') as f:
                         content = f.read()
-                        if content.startswith('#EXTM3U'):
-                            logger.info(f"[STREAM] HLS playlist ready after {i+1} seconds")
-                            break
-                except:
-                    pass
+                        if content.startswith('#EXTM3U') and '.ts' in content:
+                            # Verify at least one segment exists
+                            segment_match = re.search(r'stream\d+\.ts', content)
+                            if segment_match:
+                                segment_file = os.path.join(hls_dir, segment_match.group(0))
+                                if os.path.exists(segment_file) and os.path.getsize(segment_file) > 0:
+                                    logger.info(f"[STREAM] HLS playlist ready after {i+1} seconds")
+                                    logger.info(f"[STREAM] First segment: {segment_match.group(0)} ({os.path.getsize(segment_file)} bytes)")
+                                    self.current_channel = channel
+                                    logger.info("="*70)
+                                    return True
+                except Exception as e:
+                    logger.warning(f"[STREAM] Error checking playlist: {e}")
             time.sleep(1)
-        else:
-            logger.error(f"[STREAM] HLS playlist not ready after {max_wait} seconds")
-            # Continue anyway, it might work
 
-        logger.info(f"[STREAM] HLS files will be created in: {hls_dir}")
+        logger.error(f"[STREAM] HLS playlist not ready after {max_wait} seconds")
+
+        # Debug: Check what files exist
+        if os.path.exists(hls_dir):
+            files = os.listdir(hls_dir)
+            logger.error(f"[STREAM] HLS directory contains: {files}")
+            for f in files:
+                fpath = os.path.join(hls_dir, f)
+                if os.path.isfile(fpath):
+                    logger.error(f"[STREAM]   {f}: {os.path.getsize(fpath)} bytes")
+
+        logger.info("="*70)
         return True
 
     def surf(self, direction):
