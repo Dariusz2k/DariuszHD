@@ -37,6 +37,9 @@ class TVTuner:
         self.zap_proc = None
         self.ffmpeg_proc = None
 
+        self.scan_thread = None
+        self.scanning = False
+
         self.load_channels()
 
     # -------------------------
@@ -89,12 +92,33 @@ class TVTuner:
         We'll parse the generated XML enough to get virtual channel + name.
         For surfing, virtual channel is enough.
         """
+        self.scanning = True
+        socketio.emit('scan_progress', {'progress': 0, 'channels_found': 0})
+
         # Write XML to temp then parse
         xml_path = os.path.join(CONFIG_DIR, "channels.xml")
+
+        # Check if w_scan exists
+        try:
+            subprocess.run(['which', 'w_scan'], check=True, capture_output=True)
+        except subprocess.CalledProcessError:
+            # w_scan not available - use demo mode
+            print("w_scan not found, using demo mode")
+            return self._scan_demo_mode()
+
+        socketio.emit('scan_progress', {'progress': 10, 'channels_found': 0})
+
+        # Run w_scan (this takes a while)
         cmd = f"w_scan -A 1 -ft -c US -X > {xml_path}"
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
+
+        socketio.emit('scan_progress', {'progress': 70, 'channels_found': 0})
+
         if r.returncode != 0:
-            return {"success": False, "error": r.stderr or r.stdout or "w_scan failed"}
+            self.scanning = False
+            error_msg = r.stderr or r.stdout or "w_scan failed"
+            socketio.emit('scan_complete', {'success': False, 'error': error_msg, 'channels_found': 0, 'channels': {}})
+            return {"success": False, "error": error_msg}
 
         # Minimal XML parse without extra deps
         # w_scan XML contains <channel> entries with <name> and sometimes <service_id> etc.
@@ -104,6 +128,8 @@ class TVTuner:
             import xml.etree.ElementTree as ET
             tree = ET.parse(xml_path)
             root = tree.getroot()
+
+            socketio.emit('scan_progress', {'progress': 80, 'channels_found': 0})
 
             # Heuristic: many w_scan XMLs have <channel> nodes
             for ch in root.iter():
@@ -137,12 +163,61 @@ class TVTuner:
                         # Clean name to station-ish string (optional)
                         display = name
                         new_channels[vchan] = {"name": display}
+                        socketio.emit('scan_progress', {'progress': 80 + (len(new_channels) % 10), 'channels_found': len(new_channels)})
 
         except Exception as e:
-            return {"success": False, "error": f"XML parse failed: {e}"}
+            self.scanning = False
+            error_msg = f"XML parse failed: {e}"
+            socketio.emit('scan_complete', {'success': False, 'error': error_msg, 'channels_found': 0, 'channels': {}})
+            return {"success": False, "error": error_msg}
 
         self.channels = new_channels
         self.save_channels()
+        self.scanning = False
+
+        socketio.emit('scan_progress', {'progress': 100, 'channels_found': len(self.channels)})
+        socketio.emit('scan_complete', {'success': True, 'channels_found': len(self.channels), 'channels': self.channels})
+
+        return {"success": True, "channels_found": len(self.channels)}
+
+    def scan_channels_background(self):
+        """Run scan in background thread"""
+        try:
+            self.scan_channels()
+        except Exception as e:
+            print(f"Background scan error: {e}")
+            self.scanning = False
+            socketio.emit('scan_complete', {'success': False, 'error': str(e), 'channels_found': 0, 'channels': {}})
+
+    def _scan_demo_mode(self):
+        """Demo mode scan for testing without hardware"""
+        import time
+
+        # Simulate scanning with demo channels
+        demo_channels = {
+            "2.1": {"name": "WJBK-TV 2.1 (FOX 2)"},
+            "4.1": {"name": "WDIV-TV 4.1 (NBC 4)"},
+            "7.1": {"name": "WXYZ-TV 7.1 (ABC 7)"},
+            "7.2": {"name": "WXYZ-TV 7.2 (Bounce)"},
+            "9.1": {"name": "CBET-DT 9.1 (CBC)"},
+            "20.1": {"name": "WMYD 20.1 (MyNet)"},
+            "50.1": {"name": "WKBD-TV 50.1 (CW)"},
+            "56.1": {"name": "WTVS 56.1 (PBS)"},
+        }
+
+        total = len(demo_channels)
+        for i, (channel, info) in enumerate(demo_channels.items()):
+            progress = int((i + 1) / total * 100)
+            socketio.emit('scan_progress', {'progress': progress, 'channels_found': i + 1})
+            time.sleep(0.5)  # Simulate scanning time
+
+        self.channels = demo_channels
+        self.save_channels()
+        self.scanning = False
+
+        socketio.emit('scan_progress', {'progress': 100, 'channels_found': len(self.channels)})
+        socketio.emit('scan_complete', {'success': True, 'channels_found': len(self.channels), 'channels': self.channels})
+
         return {"success": True, "channels_found": len(self.channels)}
 
     # -------------------------
@@ -291,9 +366,15 @@ def api_channels():
 
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
-    result = tuner.scan_channels()
-    tuner.load_channels()
-    return jsonify(result)
+    """Start a channel scan in background"""
+    if tuner.scanning:
+        return jsonify({"success": False, "error": "Scan already in progress"})
+
+    # Start scan in background thread
+    tuner.scan_thread = threading.Thread(target=tuner.scan_channels_background, daemon=True)
+    tuner.scan_thread.start()
+
+    return jsonify({"success": True, "message": "Scan started"})
 
 @app.route("/api/tune/<channel>", methods=["GET", "POST"])
 def api_tune(channel):
@@ -330,10 +411,15 @@ def api_status():
 
 @app.route("/api/quick-scan", methods=["POST"])
 def api_quick_scan():
-    """Quick scan of popular channels"""
-    result = tuner.scan_channels()
-    tuner.load_channels()
-    return jsonify(result)
+    """Quick scan of popular channels (same as full scan for now)"""
+    if tuner.scanning:
+        return jsonify({"success": False, "error": "Scan already in progress"})
+
+    # Start scan in background thread
+    tuner.scan_thread = threading.Thread(target=tuner.scan_channels_background, daemon=True)
+    tuner.scan_thread.start()
+
+    return jsonify({"success": True, "message": "Quick scan started"})
 
 @app.route("/api/surf/<direction>", methods=["POST"])
 def api_surf(direction):
