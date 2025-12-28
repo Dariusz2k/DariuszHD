@@ -141,7 +141,8 @@ class TVTuner:
 
         # Run w_scan with real-time output monitoring
         # w_scan outputs XML to stdout and progress to stderr
-        cmd = f"w_scan -A 1 -ft -c US -X"
+        # -o 4 = XML output format
+        cmd = f"w_scan -A 1 -ft -c US -o 4"
         logger.info(f"[SCAN] Running w_scan command: {cmd}")
         logger.info(f"[SCAN] Saving XML output to: {xml_path}")
         logger.info("[SCAN] *** This will take 5-10 minutes, monitoring progress... ***")
@@ -159,7 +160,12 @@ class TVTuner:
 
         channels_found = 0
         current_freq = ""
+        current_freq_mhz = 0
         recent_channels = []  # Track recently found channels
+
+        # ATSC frequency range for progress calculation (54 MHz to 858 MHz)
+        FREQ_MIN = 54
+        FREQ_MAX = 858
 
         # Monitor stderr in real-time (w_scan outputs to stderr)
         while True:
@@ -196,8 +202,18 @@ class TVTuner:
                 new_freq = f"{freq_mhz:.1f} MHz"
                 if new_freq != current_freq:  # Only emit if frequency changed
                     current_freq = new_freq
+                    current_freq_mhz = freq_mhz
+
+                    # Calculate progress based on frequency range (54-858 MHz)
+                    # Reserve 10-90% for scanning, 90-100% for parsing
+                    if freq_mhz >= FREQ_MIN and freq_mhz <= FREQ_MAX:
+                        scan_progress = ((freq_mhz - FREQ_MIN) / (FREQ_MAX - FREQ_MIN)) * 80 + 10
+                        progress = int(min(90, max(10, scan_progress)))
+                    else:
+                        progress = 10
+
                     socketio.emit('scan_progress', {
-                        'progress': 10,
+                        'progress': progress,
                         'channels_found': channels_found,
                         'status': f'Scanning {current_freq}',
                         'recent_channels': recent_channels[-5:]  # Last 5 channels
@@ -207,6 +223,13 @@ class TVTuner:
             # Format: "service is running. Channel number: 2:1. Name: 'WJBK   '"
             if "service is running" in line.lower():
                 channels_found += 1
+
+                # Calculate current progress based on last known frequency
+                if current_freq_mhz >= FREQ_MIN and current_freq_mhz <= FREQ_MAX:
+                    scan_progress = ((current_freq_mhz - FREQ_MIN) / (FREQ_MAX - FREQ_MIN)) * 80 + 10
+                    progress = int(min(90, max(10, scan_progress)))
+                else:
+                    progress = 10
 
                 # Extract channel number and name
                 channel_match = re.search(r'Channel number:\s*(\d+):(\d+)\.\s*Name:\s*["\']([^"\']+)["\']', line)
@@ -219,7 +242,7 @@ class TVTuner:
                     logger.info(f"[SCAN] Found service #{channels_found}: {channel_display}")
 
                     socketio.emit('scan_progress', {
-                        'progress': 10,
+                        'progress': progress,
                         'channels_found': channels_found,
                         'status': f'Found: {channel_display}',
                         'recent_channels': recent_channels[-5:]  # Last 5 channels
@@ -228,7 +251,7 @@ class TVTuner:
                     # Fallback if parsing fails
                     logger.info(f"[SCAN] Found service #{channels_found}")
                     socketio.emit('scan_progress', {
-                        'progress': 10,
+                        'progress': progress,
                         'channels_found': channels_found,
                         'status': f'Found {channels_found} services at {current_freq}',
                         'recent_channels': recent_channels[-5:]
@@ -256,8 +279,8 @@ class TVTuner:
         else:
             logger.error(f"[SCAN] XML file does not exist at: {xml_path}")
 
-        logger.info("[SCAN] Emitting progress: 70%")
-        socketio.emit('scan_progress', {'progress': 70, 'channels_found': channels_found, 'status': 'Parsing results...'})
+        logger.info("[SCAN] Emitting progress: 90%")
+        socketio.emit('scan_progress', {'progress': 90, 'channels_found': channels_found, 'status': 'Parsing results...'})
 
         if returncode != 0 and not self.scan_cancelled:
             self.scanning = False
