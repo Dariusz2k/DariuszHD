@@ -173,6 +173,14 @@ function startFullScan() {
         if (!data.success) {
             alert('Failed to start scan: ' + (data.error || 'Unknown error'));
             scanModal.hide();
+            return;
+        }
+        const scanResults = document.getElementById('scanResults');
+        if (data.background) {
+            scanResults.innerHTML = '<small class="text-muted">Scanning frequencies...</small>';
+        } else if (data.channels_found !== undefined) {
+            updateScanProgress({progress: 100, channels_found: data.channels_found});
+            completeScan({channels_found: data.channels_found, channels: data.channels || {}});
         }
     })
     .catch(error => {

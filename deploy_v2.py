@@ -950,7 +950,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
+User=root
 WorkingDirectory={self.project_root}/app
 Environment=PATH={self.project_root}/venv/bin
 ExecStart={self.project_root}/venv/bin/python app.py

@@ -26,6 +26,7 @@ class TVTuner:
         # Pick tuner 0 by default; you can make this configurable later
         self.frontend = "/dev/dvb/adapter0/frontend0"
         self.dvr = "/dev/dvb/adapter0/dvr0"
+        self.adapter_index = self._get_adapter_index()
 
         self.channels = {}
         self.channel_order = []
@@ -35,6 +36,7 @@ class TVTuner:
         self.ffmpeg_proc = None
 
         self.load_channels()
+        self.scan_status = {"status": "idle"}
 
     # -------------------------
     # Channels: load/save/sort
@@ -71,6 +73,19 @@ class TVTuner:
     # -------------------------
     # Scan using w_scan
     # -------------------------
+    def _get_adapter_index(self):
+        env_adapter = os.environ.get("HOMERUN_ADAPTER")
+        if env_adapter is not None:
+            try:
+                return int(env_adapter)
+            except ValueError:
+                pass
+        import re
+        match = re.search(r"adapter(\d+)", self.frontend)
+        if match:
+            return int(match.group(1))
+        return 0
+
     def scan_channels(self):
         """
         Run w_scan and extract channels into channels.json.
@@ -80,10 +95,14 @@ class TVTuner:
         """
         # Write XML to temp then parse
         xml_path = "/opt/homerun-clone/config/channels.xml"
-        cmd = f"w_scan -A 1 -ft -c US -X > {xml_path}"
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        cmd = ["w_scan", "-A", "1", "-ft", "-c", "US", "-X", "-a", str(self.adapter_index)]
+        try:
+            with open(xml_path, "w") as xml_file:
+                r = subprocess.run(cmd, stdout=xml_file, stderr=subprocess.PIPE, text=True)
+        except OSError as e:
+            return {"success": False, "error": f"Failed to run w_scan: {e}"}
         if r.returncode != 0:
-            return {"success": False, "error": r.stderr or r.stdout or "w_scan failed"}
+            return {"success": False, "error": r.stderr or "w_scan failed"}
 
         # Minimal XML parse without extra deps
         # w_scan XML contains <channel> entries with <name> and sometimes <service_id> etc.
@@ -133,6 +152,19 @@ class TVTuner:
         self.channels = new_channels
         self.save_channels()
         return {"success": True, "channels_found": len(self.channels)}
+
+    def run_scan(self):
+        self.scan_status = {"status": "running"}
+        socketio.emit("scan_progress", {"progress": 0, "channels_found": 0})
+        result = self.scan_channels()
+        if result.get("success"):
+            self.scan_status = {"status": "complete"}
+            result["channels"] = self.channels
+            socketio.emit("scan_complete", result)
+        else:
+            self.scan_status = {"status": "error", "message": result.get("error")}
+            socketio.emit("scan_complete", {"success": False, "error": result.get("error")})
+        return result
 
     # -------------------------
     # Tuning
@@ -277,9 +309,24 @@ def index():
 def api_channels():
     return jsonify(tuner.channels)
 
+@app.route("/api/status")
+def api_status():
+    return jsonify({
+        "current_channel": tuner.current_channel,
+        "is_streaming": tuner.ffmpeg_proc is not None and tuner.ffmpeg_proc.poll() is None,
+        "channels": tuner.channels,
+        "scan_status": tuner.scan_status,
+    })
+
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
-    result = tuner.scan_channels()
+    payload = request.get_json(silent=True) or {}
+    background = payload.get("background", False)
+    if background:
+        thread = threading.Thread(target=tuner.run_scan, daemon=True)
+        thread.start()
+        return jsonify({"success": True, "background": True})
+    result = tuner.run_scan()
     tuner.load_channels()
     return jsonify(result)
 
@@ -332,8 +379,11 @@ def stream_ts():
 
 @socketio.on("connect")
 def on_connect():
-    emit("status", {"current_channel": tuner.current_channel, "channels": tuner.channels})
+    emit("status", {
+        "current_channel": tuner.current_channel,
+        "channels": tuner.channels,
+        "scan_status": tuner.scan_status,
+    })
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
-
