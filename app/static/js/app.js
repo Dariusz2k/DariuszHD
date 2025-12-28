@@ -232,9 +232,9 @@ async function quickScan() {
 
 async function tuneChannel(channel) {
     try {
-        const response = await fetch(`/api/tune/${channel}`);
+        const response = await fetch(`/api/tune/${channel}`, {method: 'POST'});
         const data = await response.json();
-        
+
         if (data.success) {
             currentChannel = channel;
             updateChannelInfo({current_channel: channel, is_streaming: false});
@@ -276,15 +276,15 @@ async function startStream() {
         alert('Please select a channel first');
         return;
     }
-    
+
     try {
-        const response = await fetch(`/api/stream/${currentChannel}`);
+        const response = await fetch(`/api/stream/${currentChannel}`, {method: 'POST'});
         const data = await response.json();
-        
+
         if (data.success) {
             isStreaming = true;
             updateUI();
-            
+
             // Update video source
             const video = document.getElementById('videoPlayer');
             video.src = `/stream.ts?channel=${currentChannel}&t=${Date.now()}`;
@@ -295,18 +295,19 @@ async function startStream() {
         }
     } catch (error) {
         console.error('Stream start error:', error);
+        alert('Failed to start stream: ' + error.message);
     }
 }
 
 async function stopStream() {
     try {
-        const response = await fetch('/api/stop');
+        const response = await fetch('/api/stop', {method: 'POST'});
         const data = await response.json();
-        
+
         if (data.success) {
             isStreaming = false;
             updateUI();
-            
+
             const video = document.getElementById('videoPlayer');
             video.pause();
             video.src = '';

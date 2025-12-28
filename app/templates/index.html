@@ -19,24 +19,31 @@
             </div>
         </nav>
 
-        <div class="row mt-3">
+        <div class="row mt-3 g-3">
             <div class="col-md-3">
-                <div class="card">
-                    <div class="card-header">
-                        <h5>Channels <span id="channelCount" class="badge bg-primary ms-2">{{ channels|length }}</span></h5>
-                        <div class="btn-group-vertical w-100 mt-2">
-                            <button class="btn btn-sm btn-outline-primary" onclick="showScanModal()">Full Scan</button>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="quickScan()">Quick Scan</button>
-                        </div>
+                <div class="card h-100">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">
+                            <span class="me-2">📺</span>Channels
+                            <span id="channelCount" class="badge bg-light text-primary ms-2">{{ channels|length }}</span>
+                        </h5>
                     </div>
-                    <div class="card-body">
-                        <div id="channelList" class="list-group">
+                    <div class="card-body p-2">
+                        <div class="btn-group-vertical w-100 mb-2">
+                            <button class="btn btn-sm btn-outline-primary" onclick="showScanModal()">
+                                <strong>⟳</strong> Full Scan
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="quickScan()">
+                                <strong>⚡</strong> Quick Scan
+                            </button>
+                        </div>
+                        <div id="channelList" class="list-group channel-list-scroll">
                             {% for channel, info in channels.items() %}
-                            <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" 
+                            <button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2"
                                     onclick="tuneChannel('{{ channel }}')">
-                                <div>
-                                    <strong>{{ channel }}</strong><br>
-                                    <small class="text-muted">{{ info.name }}</small>
+                                <div class="text-start">
+                                    <strong class="channel-number">{{ channel }}</strong><br>
+                                    <small class="text-muted channel-name">{{ info.name }}</small>
                                 </div>
                                 {% if info.signal_strength is defined %}
                                 <span class="badge bg-{% if info.signal_strength > 70 %}success{% elif info.signal_strength > 40 %}warning{% else %}danger{% endif %}">
@@ -52,18 +59,25 @@
             
             <div class="col-md-9">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between">
-                        <h5 id="currentChannel">No Channel Selected</h5>
-                        <div>
-                            <button id="playBtn" class="btn btn-success" onclick="startStream()">Play</button>
-                            <button id="stopBtn" class="btn btn-danger" onclick="stopStream()">Stop</button>
-							<button class="btn btn-outline-secondary" onclick="surfPrev()">◀ Prev</button>
-<button class="btn btn-outline-secondary" onclick="surfNext()">Next ▶</button>
-
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 id="currentChannel" class="mb-0">No Channel Selected</h5>
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-outline-secondary" onclick="surfPrev()" title="Previous Channel">
+                                <span class="fw-bold">◀</span> Prev
+                            </button>
+                            <button id="playBtn" class="btn btn-success" onclick="startStream()" title="Start Playback">
+                                ▶ Play
+                            </button>
+                            <button id="stopBtn" class="btn btn-danger" onclick="stopStream()" title="Stop Playback">
+                                ■ Stop
+                            </button>
+                            <button class="btn btn-outline-secondary" onclick="surfNext()" title="Next Channel">
+                                Next <span class="fw-bold">▶</span>
+                            </button>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <div id="videoContainer" class="ratio ratio-16x9">
+                    <div class="card-body p-0">
+                        <div id="videoContainer" class="ratio ratio-16x9 bg-dark">
                             <video id="videoPlayer" class="w-100" controls>
                                 <source src="/stream" type="video/mp2t">
                                 Your browser does not support the video tag.
@@ -73,19 +87,34 @@
                 </div>
                 
                 <div class="card mt-3">
-                    <div class="card-header">
-                        <h6>System Information</h6>
+                    <div class="card-header bg-light">
+                        <h6 class="mb-0"><strong>System Information</strong></h6>
                     </div>
                     <div class="card-body">
-                        <div class="row">
+                        <div class="row g-3">
                             <div class="col-md-4">
-                                <small class="text-muted">Signal Strength: <span id="signalStrength">--</span>%</small>
+                                <div class="info-box p-3 bg-light rounded text-center">
+                                    <div class="text-muted small mb-1">Signal Strength</div>
+                                    <div class="fs-4 fw-bold text-primary">
+                                        <span id="signalStrength">--</span>%
+                                    </div>
+                                </div>
                             </div>
                             <div class="col-md-4">
-                                <small class="text-muted">Signal Quality: <span id="signalQuality">--</span>%</small>
+                                <div class="info-box p-3 bg-light rounded text-center">
+                                    <div class="text-muted small mb-1">Signal Quality</div>
+                                    <div class="fs-4 fw-bold text-success">
+                                        <span id="signalQuality">--</span>%
+                                    </div>
+                                </div>
                             </div>
                             <div class="col-md-4">
-                                <small class="text-muted">Scan Status: <span id="scanStatus">Idle</span></small>
+                                <div class="info-box p-3 bg-light rounded text-center">
+                                    <div class="text-muted small mb-1">Scan Status</div>
+                                    <div class="fs-6 fw-bold">
+                                        <span id="scanStatus">Idle</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

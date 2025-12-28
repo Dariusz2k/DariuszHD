@@ -12,7 +12,10 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'homerun-clone-secret-key'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-CHANNELS_JSON = "/opt/homerun-clone/config/channels.json"
+# Use project directory instead of hardcoded /opt path
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+CHANNELS_JSON = os.path.join(CONFIG_DIR, "channels.json")
 
 class TVTuner:
     """
@@ -79,7 +82,7 @@ class TVTuner:
         For surfing, virtual channel is enough.
         """
         # Write XML to temp then parse
-        xml_path = "/opt/homerun-clone/config/channels.xml"
+        xml_path = os.path.join(CONFIG_DIR, "channels.xml")
         cmd = f"w_scan -A 1 -ft -c US -X > {xml_path}"
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         if r.returncode != 0:
@@ -159,10 +162,11 @@ class TVTuner:
         #
         # Practical workaround: use w_scan output in "zap" format instead of XML.
         #
-        # So: require that /opt/homerun-clone/config/channels.zap exists.
-        zap_path = "/opt/homerun-clone/config/channels.zap"
+        # So: require that channels.zap exists in config dir
+        zap_path = os.path.join(CONFIG_DIR, "channels.zap")
         if not os.path.exists(zap_path):
             # Generate it (czap format works for dvbv5-zap)
+            os.makedirs(CONFIG_DIR, exist_ok=True)
             cmd = f"w_scan -A 1 -ft -c US -o 1 > {zap_path}"
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             if r.returncode != 0:
@@ -283,7 +287,7 @@ def api_scan():
     tuner.load_channels()
     return jsonify(result)
 
-@app.route("/api/tune/<channel>", methods=["POST"])
+@app.route("/api/tune/<channel>", methods=["GET", "POST"])
 def api_tune(channel):
     ok = tuner.tune_channel(channel)
     return jsonify({"success": ok, "channel": channel})
@@ -293,11 +297,35 @@ def api_play(channel):
     ok = tuner.start_stream(channel)
     return jsonify({"success": ok, "channel": channel})
 
+@app.route("/api/stream/<channel>", methods=["POST"])
+def api_stream(channel):
+    """Start streaming a channel - called by frontend"""
+    ok = tuner.start_stream(channel)
+    return jsonify({"success": ok, "channel": channel})
+
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
     tuner.stop_stream()
     tuner.stop_zap()
     return jsonify({"success": True})
+
+@app.route("/api/status", methods=["GET"])
+def api_status():
+    """Return current tuner status"""
+    return jsonify({
+        "current_channel": tuner.current_channel,
+        "is_streaming": tuner.ffmpeg_proc is not None and tuner.ffmpeg_proc.poll() is None,
+        "channels": tuner.channels,
+        "signal_strength": 0,  # TODO: implement real signal strength reading
+        "signal_quality": 0
+    })
+
+@app.route("/api/quick-scan", methods=["POST"])
+def api_quick_scan():
+    """Quick scan of popular channels"""
+    result = tuner.scan_channels()
+    tuner.load_channels()
+    return jsonify(result)
 
 @app.route("/api/surf/<direction>", methods=["POST"])
 def api_surf(direction):
