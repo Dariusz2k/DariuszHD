@@ -428,9 +428,8 @@ class TVTuner:
             "dvbv5-zap",
             "-a", self.frontend,
             "-c", zap_path,
-            entry_name,
-            "-r",
-            "-q"
+            "-r",  # DVR/record mode - keeps tuner locked
+            entry_name
         ]
         logger.info(f"[TUNE] Running dvbv5-zap command: {' '.join(cmd)}")
         self.zap_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
