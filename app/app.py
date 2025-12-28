@@ -745,17 +745,21 @@ class TVTuner:
         )
 
         # Start ffmpeg reading from cat's stdout
-        # Use stream copy (no re-encoding) for instant remuxing to HLS
+        # Transcode MPEG-2 to H.264 using RPI4 hardware encoder for browser compatibility
         ffmpeg_cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "info",
             "-f", "mpegts",  # Explicitly specify MPEG-TS format
             "-fflags", "+discardcorrupt+genpts",  # Discard corrupt packets, generate PTS
-            "-analyzeduration", "2000000",  # 2 seconds to probe stream (reduced from 5s)
-            "-probesize", "5000000",  # 5MB probe size (reduced from 10MB)
+            "-analyzeduration", "2000000",  # 2 seconds to probe stream
+            "-probesize", "5000000",  # 5MB probe size
             "-i", "pipe:0",  # Read from stdin (connected to cat's stdout)
-            "-c", "copy",  # Stream copy - no re-encoding!
+            # Transcode to H.264 (browsers need this, not MPEG-2)
+            "-c:v", "h264_v4l2m2m",  # RPI4 hardware H.264 encoder
+            "-b:v", "4M",  # 4Mbps video bitrate
+            "-c:a", "aac",  # Transcode AC-3 to AAC for browser support
+            "-b:a", "128k",  # 128kbps audio bitrate
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
             "-f", "hls",
             "-hls_time", "2",
