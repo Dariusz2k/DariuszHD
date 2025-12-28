@@ -751,9 +751,7 @@ class TVTuner:
             "-hide_banner",
             "-loglevel", "info",
             "-f", "mpegts",  # Explicitly specify MPEG-TS format
-            "-fflags", "+discardcorrupt+genpts",  # Discard corrupt packets, generate PTS
-            "-analyzeduration", "5000000",  # 5 seconds to analyze stream
-            "-probesize", "10000000",  # 10MB probe size
+            "-fflags", "+discardcorrupt+genpts+nobuffer",  # Discard corrupt packets, no buffering
             "-i", "pipe:0",  # Read from stdin (connected to cat's stdout)
             # Use RPI4 hardware encoder (h264_v4l2m2m) for fast real-time encoding
             "-c:v", "h264_v4l2m2m",  # Hardware H.264 encoder (RPI4)
