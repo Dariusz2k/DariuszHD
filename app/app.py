@@ -156,11 +156,11 @@ class TVTuner:
         self.scan_proc = None
         self.scan_status = {"status": "canceled"}
 
-    def _emit_scan_progress(self, frequency_khz, channels_found):
+    def _emit_scan_progress(self, frequency_khz, channels_found, progress):
         socketio.emit("scan_progress", {
             "frequency_khz": frequency_khz,
             "channels_found": channels_found,
-            "progress": 0
+            "progress": progress
         })
 
     def run_scan(self):
@@ -174,6 +174,8 @@ class TVTuner:
             channels_found = 0
             frequency_khz = None
             stderr_output = []
+            freq_min_khz = 54000
+            freq_max_khz = 858000
 
             try:
                 with open(xml_path, "w") as xml_file:
@@ -194,9 +196,18 @@ class TVTuner:
                             match = re.search(r"(\d+):", line)
                             if match:
                                 frequency_khz = int(match.group(1))
+                                progress = int(
+                                    max(
+                                        0,
+                                        min(
+                                            100,
+                                            ((frequency_khz - freq_min_khz) / (freq_max_khz - freq_min_khz)) * 100,
+                                        ),
+                                    )
+                                )
                                 if "signal ok" in line:
                                     channels_found += 1
-                                self._emit_scan_progress(frequency_khz, channels_found)
+                                self._emit_scan_progress(frequency_khz, channels_found, progress)
                     self.scan_proc.wait()
             except OSError as e:
                 self.scan_proc = None
@@ -215,6 +226,7 @@ class TVTuner:
         result = self.scan_channels(xml_path)
         if result.get("success"):
             self.scan_status = {"status": "complete"}
+            self._emit_scan_progress(frequency_khz, result.get("channels_found", 0), 100)
             result["channels"] = self.channels
             socketio.emit("scan_complete", result)
         else:
