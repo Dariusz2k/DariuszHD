@@ -472,13 +472,15 @@ class TVTuner:
         """
         Convert w_scan's native output format to azap-compatible format.
 
-        w_scan format:  WJBK   ;(null):177000:M10:A:0:49:52=eng...
-        azap format:    WJBK:177000000:8VSB
+        w_scan format:  WJBK   ;(null):177000:M10:A:0:49:52=eng,53=spa;52,53:0:0:3:0:0:0
+        azap format:    WJBK:177000000:8VSB:49:52
 
         Fields:
         - Channel name (before semicolon, trimmed)
         - Frequency in Hz (w_scan outputs kHz, multiply by 1000)
         - Modulation (8VSB for ATSC)
+        - Video PID (from w_scan field 6)
+        - Audio PID (first audio PID from w_scan field 7)
         """
         try:
             with open(zap_path, 'r') as f:
@@ -490,10 +492,10 @@ class TVTuner:
                 if not line or line.startswith('#'):
                     continue
 
-                # Parse w_scan format: NAME;source:freq:modulation:...
+                # Parse w_scan format: NAME;source:freq:modulation:...:vpid:apid:...
                 parts = line.split(':')
-                if len(parts) < 3:
-                    logger.warning(f"[SCAN] Skipping malformed line: {line[:50]}")
+                if len(parts) < 7:
+                    logger.warning(f"[SCAN] Skipping malformed line (not enough fields): {line[:50]}")
                     continue
 
                 # Extract channel name (before semicolon)
@@ -507,11 +509,33 @@ class TVTuner:
                     logger.warning(f"[SCAN] Could not parse frequency from: {line[:50]}")
                     continue
 
+                # Extract video PID (field 6)
+                try:
+                    video_pid = parts[5].strip()
+                    # Handle cases like "49=2" - take just the number before =
+                    if '=' in video_pid:
+                        video_pid = video_pid.split('=')[0]
+                    video_pid = int(video_pid)
+                except (ValueError, IndexError):
+                    logger.warning(f"[SCAN] Could not parse video PID from: {line[:50]}")
+                    continue
+
+                # Extract audio PID (field 7, take first one)
+                try:
+                    audio_field = parts[6].strip()
+                    # Format: "52=eng,53=spa;52,53" or just "52"
+                    # Take the first number before any = or ; or ,
+                    audio_pid = audio_field.split('=')[0].split(';')[0].split(',')[0].strip()
+                    audio_pid = int(audio_pid)
+                except (ValueError, IndexError):
+                    logger.warning(f"[SCAN] Could not parse audio PID from: {line[:50]}")
+                    continue
+
                 # For ATSC, modulation is always 8VSB
                 modulation = "8VSB"
 
-                # Create azap format line
-                azap_line = f"{name_part}:{freq_hz}:{modulation}"
+                # Create azap format line: NAME:FREQ:MOD:VPID:APID
+                azap_line = f"{name_part}:{freq_hz}:{modulation}:{video_pid}:{audio_pid}"
                 converted_lines.append(azap_line)
 
             # Write back to file
@@ -525,9 +549,9 @@ class TVTuner:
 
     def _find_zap_entry_by_name(self, zap_path, station_name):
         """
-        channels.zap lines from w_scan look like:
-          WJBK:177000000:8VSB
-        Extract the station name before the first separator (: or ;) and match against station_name
+        channels.zap lines in azap format look like:
+          WJBK:177000000:8VSB:49:52
+        Extract the station name before the first colon and match against station_name
         """
         try:
             with open(zap_path, "r", errors="ignore") as f:
