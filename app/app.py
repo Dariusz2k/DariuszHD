@@ -123,9 +123,6 @@ class TVTuner:
         logger.info("[SCAN] Emitting progress: 0%")
         socketio.emit('scan_progress', {'progress': 0, 'channels_found': 0})
 
-        # Write XML to temp then parse
-        xml_path = os.path.join(CONFIG_DIR, "channels.xml")
-
         # Check if w_scan exists
         logger.info("[SCAN] Checking if w_scan is installed...")
         try:
@@ -140,19 +137,15 @@ class TVTuner:
         socketio.emit('scan_progress', {'progress': 10, 'channels_found': 0, 'status': 'Starting scan...'})
 
         # Run w_scan with real-time output monitoring
-        # w_scan outputs XML to stdout and progress to stderr
-        # -o 4 = XML output format
-        cmd = f"w_scan -A 1 -ft -c US -o 4"
+        # We parse channel info from stderr output, no need for file output
+        cmd = f"w_scan -A 1 -ft -c US"
         logger.info(f"[SCAN] Running w_scan command: {cmd}")
-        logger.info(f"[SCAN] Saving XML output to: {xml_path}")
         logger.info("[SCAN] *** This will take 5-10 minutes, monitoring progress... ***")
 
-        # Start w_scan and monitor its output in real-time
-        # Redirect stdout to XML file, capture stderr for monitoring
-        xml_file = open(xml_path, 'w')
+        # Start w_scan and monitor its stderr output in real-time
         self.scan_proc = subprocess.Popen(
             cmd.split(),
-            stdout=xml_file,
+            stdout=subprocess.DEVNULL,  # Discard stdout, we parse stderr
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1
@@ -162,6 +155,7 @@ class TVTuner:
         current_freq = ""
         current_freq_mhz = 0
         recent_channels = []  # Track recently found channels
+        new_channels = {}  # Build channel list from stderr parsing
 
         # ATSC frequency range for progress calculation (54 MHz to 858 MHz)
         FREQ_MIN = 54
@@ -176,7 +170,6 @@ class TVTuner:
                     self.scan_proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     self.scan_proc.kill()
-                xml_file.close()
                 self.scanning = False
                 self.scan_cancelled = False
                 socketio.emit('scan_complete', {'success': False, 'error': 'Scan cancelled', 'channels_found': 0, 'channels': {}})
@@ -237,7 +230,12 @@ class TVTuner:
                     major = channel_match.group(1)
                     minor = channel_match.group(2)
                     name = channel_match.group(3).strip()
-                    channel_display = f"{major}.{minor} {name}"
+                    channel_id = f"{major}.{minor}"
+                    channel_display = f"{channel_id} {name}"
+
+                    # Add to channels dict for later saving
+                    new_channels[channel_id] = {"name": name}
+
                     recent_channels.append(channel_display)
                     logger.info(f"[SCAN] Found service #{channels_found}: {channel_display}")
 
@@ -260,27 +258,10 @@ class TVTuner:
         # Wait for process to complete
         self.scan_proc.wait()
         returncode = self.scan_proc.returncode
-        xml_file.close()  # Close the XML file now that w_scan has finished
 
         logger.info(f"[SCAN] w_scan completed with return code: {returncode}")
         logger.info(f"[SCAN] Found {channels_found} services during scan")
-
-        # Diagnostic logging for XML file
-        if os.path.exists(xml_path):
-            file_size = os.path.getsize(xml_path)
-            logger.info(f"[SCAN] XML file exists at: {xml_path}")
-            logger.info(f"[SCAN] XML file size: {file_size} bytes")
-            if file_size > 0:
-                with open(xml_path, 'r') as f:
-                    first_lines = ''.join(f.readlines()[:5])
-                    logger.info(f"[SCAN] First lines of XML:\n{first_lines}")
-            else:
-                logger.error("[SCAN] XML file is empty!")
-        else:
-            logger.error(f"[SCAN] XML file does not exist at: {xml_path}")
-
-        logger.info("[SCAN] Emitting progress: 90%")
-        socketio.emit('scan_progress', {'progress': 90, 'channels_found': channels_found, 'status': 'Parsing results...'})
+        logger.info(f"[SCAN] Parsed {len(new_channels)} channels from scan output")
 
         if returncode != 0 and not self.scan_cancelled:
             self.scanning = False
@@ -288,62 +269,16 @@ class TVTuner:
             socketio.emit('scan_complete', {'success': False, 'error': error_msg, 'channels_found': 0, 'channels': {}})
             return {"success": False, "error": error_msg}
 
-        # Minimal XML parse without extra deps
-        # w_scan XML contains <channel> entries with <name> and sometimes <service_id> etc.
-        # We'll build a best-effort mapping: "major.minor" -> {"name": "..."}
-        new_channels = {}
-        try:
-            import xml.etree.ElementTree as ET
-            tree = ET.parse(xml_path)
-            root = tree.getroot()
+        logger.info("[SCAN] Emitting progress: 95%")
+        socketio.emit('scan_progress', {'progress': 95, 'channels_found': len(new_channels), 'status': 'Saving channels...'})
 
-            socketio.emit('scan_progress', {'progress': 80, 'channels_found': 0})
-
-            # Heuristic: many w_scan XMLs have <channel> nodes
-            for ch in root.iter():
-                if ch.tag.lower().endswith("channel"):
-                    name = None
-                    vchan = None
-                    # Look for children like <name>, <service_name>, <channel_name>
-                    for c in list(ch):
-                        tag = c.tag.lower()
-                        txt = (c.text or "").strip()
-                        if not txt:
-                            continue
-                        if "name" == tag or tag.endswith("name"):
-                            # Don't overwrite if we already set a more specific field
-                            if name is None:
-                                name = txt
-                        if "channel" in tag and ("major" in tag or "minor" in tag):
-                            # some formats split major/minor; handled below
-                            pass
-
-                    # Many w_scan XML formats actually store the channel string in the <name>
-                    # like "WXYZ-DT 7.1" or similar. Extract trailing N.N pattern.
-                    if name:
-                        import re
-                        m = re.search(r"(\d{1,3}\.\d{1,3})", name)
-                        if m:
-                            vchan = m.group(1)
-
-                    # If no vchan extracted, skip (we still keep raw name if you want later)
-                    if vchan:
-                        # Clean name to station-ish string (optional)
-                        display = name
-                        new_channels[vchan] = {"name": display}
-                        socketio.emit('scan_progress', {'progress': 80 + (len(new_channels) % 10), 'channels_found': len(new_channels)})
-
-        except Exception as e:
-            self.scanning = False
-            error_msg = f"XML parse failed: {e}"
-            socketio.emit('scan_complete', {'success': False, 'error': error_msg, 'channels_found': 0, 'channels': {}})
-            return {"success": False, "error": error_msg}
-
+        # Save the channels we parsed from stderr
         self.channels = new_channels
         self.save_channels()
         self.scanning = False
 
-        socketio.emit('scan_progress', {'progress': 100, 'channels_found': len(self.channels)})
+        logger.info(f"[SCAN] Saved {len(self.channels)} channels to {CHANNELS_JSON}")
+        socketio.emit('scan_progress', {'progress': 100, 'channels_found': len(self.channels), 'status': 'Complete!'})
         socketio.emit('scan_complete', {'success': True, 'channels_found': len(self.channels), 'channels': self.channels})
 
         return {"success": True, "channels_found": len(self.channels)}
