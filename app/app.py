@@ -92,18 +92,24 @@ class TVTuner:
         We'll parse the generated XML enough to get virtual channel + name.
         For surfing, virtual channel is enough.
         """
+        print("[SCAN] ========================================")
+        print("[SCAN] Starting channel scan...")
         self.scanning = True
-        socketio.emit('scan_progress', {'progress': 0, 'channels_found': 0})
+
+        print("[SCAN] Emitting progress: 0%")
+        socketio.emit('scan_progress', {'progress': 0, 'channels_found': 0}, broadcast=True)
 
         # Write XML to temp then parse
         xml_path = os.path.join(CONFIG_DIR, "channels.xml")
 
         # Check if w_scan exists
+        print("[SCAN] Checking if w_scan is installed...")
         try:
-            subprocess.run(['which', 'w_scan'], check=True, capture_output=True)
+            result = subprocess.run(['which', 'w_scan'], check=True, capture_output=True)
+            print(f"[SCAN] w_scan found at: {result.stdout.decode().strip()}")
         except subprocess.CalledProcessError:
             # w_scan not available - use demo mode
-            print("w_scan not found, using demo mode")
+            print("[SCAN] w_scan NOT found - switching to DEMO MODE")
             return self._scan_demo_mode()
 
         socketio.emit('scan_progress', {'progress': 10, 'channels_found': 0})
@@ -182,16 +188,23 @@ class TVTuner:
 
     def scan_channels_background(self):
         """Run scan in background thread"""
+        print("[BACKGROUND] Thread started - calling scan_channels()")
         try:
-            self.scan_channels()
+            result = self.scan_channels()
+            print(f"[BACKGROUND] scan_channels() returned: {result}")
         except Exception as e:
-            print(f"Background scan error: {e}")
+            print(f"[BACKGROUND] ERROR in background scan: {e}")
+            import traceback
+            traceback.print_exc()
             self.scanning = False
-            socketio.emit('scan_complete', {'success': False, 'error': str(e), 'channels_found': 0, 'channels': {}})
+            socketio.emit('scan_complete', {'success': False, 'error': str(e), 'channels_found': 0, 'channels': {}}, broadcast=True)
 
     def _scan_demo_mode(self):
         """Demo mode scan for testing without hardware"""
         import time
+
+        print("[DEMO] ========================================")
+        print("[DEMO] Entering DEMO MODE - simulating channel scan")
 
         # Simulate scanning with demo channels
         demo_channels = {
@@ -205,19 +218,30 @@ class TVTuner:
             "56.1": {"name": "WTVS 56.1 (PBS)"},
         }
 
+        print(f"[DEMO] Will simulate finding {len(demo_channels)} channels")
+
         total = len(demo_channels)
         for i, (channel, info) in enumerate(demo_channels.items()):
             progress = int((i + 1) / total * 100)
-            socketio.emit('scan_progress', {'progress': progress, 'channels_found': i + 1})
+            print(f"[DEMO] Progress: {progress}% - Found channel {channel}: {info['name']}")
+            print(f"[DEMO] Emitting scan_progress event: progress={progress}, channels_found={i+1}")
+            socketio.emit('scan_progress', {'progress': progress, 'channels_found': i + 1}, broadcast=True)
             time.sleep(0.5)  # Simulate scanning time
 
+        print("[DEMO] Saving channels to JSON...")
         self.channels = demo_channels
         self.save_channels()
         self.scanning = False
+        print(f"[DEMO] Saved {len(self.channels)} channels to {CHANNELS_JSON}")
 
-        socketio.emit('scan_progress', {'progress': 100, 'channels_found': len(self.channels)})
-        socketio.emit('scan_complete', {'success': True, 'channels_found': len(self.channels), 'channels': self.channels})
+        print("[DEMO] Emitting final progress (100%)")
+        socketio.emit('scan_progress', {'progress': 100, 'channels_found': len(self.channels)}, broadcast=True)
 
+        print("[DEMO] Emitting scan_complete event")
+        socketio.emit('scan_complete', {'success': True, 'channels_found': len(self.channels), 'channels': self.channels}, broadcast=True)
+
+        print("[DEMO] Demo scan COMPLETE!")
+        print("[DEMO] ========================================")
         return {"success": True, "channels_found": len(self.channels)}
 
     # -------------------------
@@ -367,12 +391,19 @@ def api_channels():
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
     """Start a channel scan in background"""
+    print("\n" + "="*60)
+    print("[API] /api/scan endpoint called")
+
     if tuner.scanning:
+        print("[API] ERROR: Scan already in progress")
         return jsonify({"success": False, "error": "Scan already in progress"})
 
     # Start scan in background thread
+    print("[API] Starting background thread for scan...")
     tuner.scan_thread = threading.Thread(target=tuner.scan_channels_background, daemon=True)
     tuner.scan_thread.start()
+    print(f"[API] Background thread started: {tuner.scan_thread}")
+    print("="*60 + "\n")
 
     return jsonify({"success": True, "message": "Scan started"})
 
@@ -454,7 +485,12 @@ def stream_ts():
 
 @socketio.on("connect")
 def on_connect():
+    print(f"[WEBSOCKET] Client connected!")
     emit("status", {"current_channel": tuner.current_channel, "channels": tuner.channels})
+
+@socketio.on("disconnect")
+def on_disconnect():
+    print(f"[WEBSOCKET] Client disconnected!")
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
