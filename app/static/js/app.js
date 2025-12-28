@@ -365,22 +365,20 @@ async function startStream() {
                 hls = new Hls({
                     debug: false,
                     enableWorker: true,
-                    // DVR Mode Configuration
-                    liveSyncDuration: 0,  // Start from beginning, not live edge
-                    liveMaxLatencyDuration: Infinity,  // Allow unlimited buffering
-                    maxBufferLength: 60,  // Buffer up to 60 seconds
-                    maxMaxBufferLength: 120,  // Max buffer 2 minutes
-                    backBufferLength: 90,  // Keep 90 seconds of back buffer for rewinding
-                    liveDurationInfinity: true  // Treat as DVR-capable live stream
+                    // Live streaming configuration - start from live edge to skip corrupt initial segments
+                    liveSyncDurationCount: 3,  // Start 3 segments from live edge
+                    liveMaxLatencyDuration: 10,  // Max 10s latency before catching up
+                    maxBufferLength: 30,  // Buffer 30 seconds ahead
+                    maxMaxBufferLength: 60,  // Max 60 seconds buffer
+                    backBufferLength: 30  // Keep 30 seconds for rewinding
                 });
 
                 hls.loadSource(hlsUrl);
                 hls.attachMedia(video);
 
                 hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                    console.log('HLS manifest loaded (DVR mode), starting from beginning');
-                    // Start playback from the beginning of the buffer
-                    video.currentTime = 0;
+                    console.log('HLS manifest loaded, starting from live edge');
+                    // Let hls.js start from live edge naturally (don't set currentTime)
                     video.play().catch(err => {
                         console.error('Autoplay failed:', err);
                         // Show click-to-play message if autoplay blocked
@@ -411,7 +409,7 @@ async function startStream() {
                 // Native HLS support (Safari)
                 video.src = hlsUrl;
                 video.addEventListener('loadedmetadata', function() {
-                    video.currentTime = 0;  // Start from beginning
+                    // Start from live edge naturally
                     video.play();
                 });
             } else {
