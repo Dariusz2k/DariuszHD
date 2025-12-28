@@ -137,15 +137,20 @@ class TVTuner:
         socketio.emit('scan_progress', {'progress': 10, 'channels_found': 0, 'status': 'Starting scan...'})
 
         # Run w_scan with real-time output monitoring
-        # We parse channel info from stderr output, no need for file output
+        # We parse channel info from stderr output, and save stdout to channels.zap for tuning
         cmd = f"w_scan -A 1 -ft -c US"
         logger.info(f"[SCAN] Running w_scan command: {cmd}")
         logger.info("[SCAN] *** This will take 5-10 minutes, monitoring progress... ***")
 
+        # Save stdout to channels.zap for later tuning
+        zap_path = os.path.join(CONFIG_DIR, "channels.zap")
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        zap_file = open(zap_path, 'w')
+
         # Start w_scan and monitor its stderr output in real-time
         self.scan_proc = subprocess.Popen(
             cmd.split(),
-            stdout=subprocess.DEVNULL,  # Discard stdout, we parse stderr
+            stdout=zap_file,  # Save to channels.zap for dvbv5-zap
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1
@@ -170,6 +175,7 @@ class TVTuner:
                     self.scan_proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     self.scan_proc.kill()
+                zap_file.close()
                 self.scanning = False
                 self.scan_cancelled = False
                 socketio.emit('scan_complete', {'success': False, 'error': 'Scan cancelled', 'channels_found': 0, 'channels': {}})
@@ -258,10 +264,12 @@ class TVTuner:
         # Wait for process to complete
         self.scan_proc.wait()
         returncode = self.scan_proc.returncode
+        zap_file.close()  # Close the zap file now that w_scan has finished
 
         logger.info(f"[SCAN] w_scan completed with return code: {returncode}")
         logger.info(f"[SCAN] Found {channels_found} services during scan")
         logger.info(f"[SCAN] Parsed {len(new_channels)} channels from scan output")
+        logger.info(f"[SCAN] Saved tuning data to {zap_path}")
 
         if returncode != 0 and not self.scan_cancelled:
             self.scanning = False
