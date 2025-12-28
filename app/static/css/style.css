@@ -39,3 +39,15 @@
 .status-disconnected {
     background-color: #dc3545 !important;
 }
+
+.scan-float-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 1050;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+}
+
+.card-header .btn {
+    margin-left: 0.25rem;
+}

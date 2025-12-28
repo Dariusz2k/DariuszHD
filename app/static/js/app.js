@@ -3,6 +3,7 @@ let socket;
 let currentChannel = null;
 let isStreaming = false;
 let scanModal;
+let scanStatusState = null;
 
 // Initialize WebSocket connection
 function initSocket() {
@@ -22,10 +23,21 @@ function initSocket() {
     
     socket.on('scan_progress', function(data) {
         updateScanProgress(data);
+        updateScanStatus({
+            status: 'running',
+            frequency_khz: data.frequency_khz,
+            progress: data.progress,
+            channels_found: data.channels_found
+        });
     });
     
     socket.on('scan_complete', function(data) {
         completeScan(data);
+        if (data.canceled) {
+            updateScanStatus({status: 'canceled'});
+        } else {
+            updateScanStatus({status: 'complete'});
+        }
     });
 }
 
@@ -61,25 +73,37 @@ function updateChannelInfo(data) {
 }
 
 function updateScanStatus(status) {
+    scanStatusState = status;
     const scanStatusEl = document.getElementById('scanStatus');
     const statusMap = {
         'idle': 'Idle',
         'running': 'Scanning...',
         'complete': 'Complete',
-        'error': 'Error'
+        'error': 'Error',
+        'canceled': 'Canceled'
     };
     
-    scanStatusEl.textContent = statusMap[status.status] || status.status;
+    if (status.status === 'running') {
+        const freqText = status.frequency_khz ? `${status.frequency_khz} kHz` : 'frequencies';
+        const progressText = status.progress !== undefined ? `${status.progress}%` : '--%';
+        scanStatusEl.textContent = `Scanning ${freqText} (${progressText})`;
+    } else {
+        scanStatusEl.textContent = statusMap[status.status] || status.status;
+    }
     
     if (status.status === 'running') {
         scanStatusEl.className = 'text-primary fw-bold';
     } else if (status.status === 'complete') {
         scanStatusEl.className = 'text-success';
+    } else if (status.status === 'canceled') {
+        scanStatusEl.className = 'text-warning';
     } else if (status.status === 'error') {
         scanStatusEl.className = 'text-danger';
     } else {
         scanStatusEl.className = 'text-muted';
     }
+
+    updateScanFloatingButton(status);
 }
 
 function updateChannelList(channels) {
@@ -143,6 +167,13 @@ function showScanModal() {
     document.getElementById('scanProgress').style.display = 'none';
     document.getElementById('startScanBtn').style.display = 'block';
     document.getElementById('finishScanBtn').style.display = 'none';
+    document.getElementById('cancelScanBtn').style.display = 'none';
+
+    if (scanStatusState && scanStatusState.status === 'running') {
+        document.getElementById('scanProgress').style.display = 'block';
+        document.getElementById('startScanBtn').style.display = 'none';
+        document.getElementById('cancelScanBtn').style.display = 'inline-block';
+    }
 }
 
 function updateThresholdValue() {
@@ -157,6 +188,7 @@ function startFullScan() {
     // Show progress UI
     document.getElementById('scanProgress').style.display = 'block';
     document.getElementById('startScanBtn').style.display = 'none';
+    document.getElementById('cancelScanBtn').style.display = 'inline-block';
     
     // Start scan
     const handleScanStart = (data) => {
@@ -201,7 +233,8 @@ function startFullScan() {
                     signal_threshold: threshold,
                     identify_names: identifyNames,
                     background: true,
-                    force: true
+                    force: true,
+                    keep_channels: document.getElementById('keepChannelsOnCancel').checked
                 })
             }).then(response => response.json());
         }
@@ -220,8 +253,9 @@ function updateScanProgress(data) {
     const progressPercent = document.getElementById('progressPercent');
     const scanResults = document.getElementById('scanResults');
     
-    progressBar.style.width = data.progress + '%';
-    progressPercent.textContent = data.progress + '%';
+    const progressValue = data.progress !== undefined ? data.progress : 0;
+    progressBar.style.width = progressValue + '%';
+    progressPercent.textContent = progressValue + '%';
     
     const frequencyText = data.frequency_khz
         ? `<small class="text-muted">Scanning ${data.frequency_khz} kHz...</small>`
@@ -236,9 +270,15 @@ function updateScanProgress(data) {
 function completeScan(data) {
     const scanResults = document.getElementById('scanResults');
     const finishBtn = document.getElementById('finishScanBtn');
-    
-    scanResults.innerHTML = `<small class="text-success">✓ Scan complete! Found ${data.channels_found} channels</small>`;
+
+    if (data.canceled) {
+        scanResults.innerHTML = `<small class="text-warning">Scan canceled. Found ${data.channels_found || 0} channels</small>`;
+    } else {
+        scanResults.innerHTML = `<small class="text-success">✓ Scan complete! Found ${data.channels_found} channels</small>`;
+    }
     finishBtn.style.display = 'block';
+    document.getElementById('cancelScanBtn').style.display = 'none';
+    updateScanFloatingButton({status: 'complete'});
     
     // Update the channel list with new channels
     updateChannelList(data.channels);
@@ -247,6 +287,53 @@ function completeScan(data) {
 function finishScan() {
     scanModal.hide();
     location.reload(); // Reload to refresh the channel list
+}
+
+function minimizeScan() {
+    if (scanModal) {
+        scanModal.hide();
+    }
+    updateScanFloatingButton({status: 'running'});
+}
+
+async function cancelScan() {
+    const keepChannels = document.getElementById('keepChannelsOnCancel').checked;
+    try {
+        const response = await fetch('/api/scan/cancel', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({keep_channels: keepChannels})
+        });
+        const data = await response.json();
+        if (!data.success) {
+            alert(data.error || 'Failed to cancel scan');
+            return;
+        }
+        const scanResults = document.getElementById('scanResults');
+        const keepText = data.kept ? 'keeping channels found so far.' : 'discarding partial results.';
+        scanResults.innerHTML = `<small class="text-warning">Scan canceled, ${keepText}</small>`;
+        document.getElementById('cancelScanBtn').style.display = 'none';
+        updateScanStatus({status: 'canceled'});
+        updateScanFloatingButton({status: 'canceled'});
+    } catch (error) {
+        console.error('Cancel scan error:', error);
+        alert('Failed to cancel scan');
+    }
+}
+
+function updateScanFloatingButton(status) {
+    const button = document.getElementById('scanFloatBtn');
+    if (!button) {
+        return;
+    }
+    if (status.status === 'running') {
+        const progressText = status.progress !== undefined ? `${status.progress}%` : '--%';
+        const freqText = status.frequency_khz ? `${status.frequency_khz} kHz` : 'frequencies';
+        button.textContent = `Scanning ${freqText} (${progressText})`;
+        button.style.display = 'inline-block';
+    } else {
+        button.style.display = 'none';
+    }
 }
 
 async function quickScan() {

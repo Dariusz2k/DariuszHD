@@ -41,6 +41,7 @@ class TVTuner:
         self.scan_proc = None
         self.scan_cancel = threading.Event()
         self.scan_lock = threading.Lock()
+        self.keep_partial_scan = False
 
     # -------------------------
     # Channels: load/save/sort
@@ -145,7 +146,8 @@ class TVTuner:
         self.save_channels()
         return {"success": True, "channels_found": len(self.channels)}
 
-    def cancel_scan(self):
+    def cancel_scan(self, keep_channels=False):
+        self.keep_partial_scan = keep_channels
         self.scan_cancel.set()
         if self.scan_proc and self.scan_proc.poll() is None:
             self.scan_proc.terminate()
@@ -157,6 +159,12 @@ class TVTuner:
         self.scan_status = {"status": "canceled"}
 
     def _emit_scan_progress(self, frequency_khz, channels_found, progress):
+        self.scan_status = {
+            "status": "running",
+            "frequency_khz": frequency_khz,
+            "channels_found": channels_found,
+            "progress": progress,
+        }
         socketio.emit("scan_progress", {
             "frequency_khz": frequency_khz,
             "channels_found": channels_found,
@@ -167,6 +175,7 @@ class TVTuner:
         with self.scan_lock:
             self.scan_status = {"status": "running"}
             self.scan_cancel.clear()
+            self.keep_partial_scan = False
             socketio.emit("scan_progress", {"progress": 0, "channels_found": 0})
 
             xml_path = "/opt/homerun-clone/config/channels.xml"
@@ -215,6 +224,15 @@ class TVTuner:
 
         if self.scan_cancel.is_set():
             self.scan_status = {"status": "canceled"}
+            if self.keep_partial_scan:
+                result = self.scan_channels(xml_path)
+                if result.get("success"):
+                    self.scan_status = {
+                        "status": "canceled",
+                        "channels_found": result.get("channels_found", 0),
+                    }
+                    socketio.emit("scan_complete", {"success": True, **result, "canceled": True})
+                    return {"success": True, "canceled": True, **result}
             return {"success": False, "error": "Scan canceled"}
 
         if self.scan_proc.returncode != 0:
@@ -398,6 +416,7 @@ def api_scan():
     payload = request.get_json(silent=True) or {}
     background = payload.get("background", False)
     force = payload.get("force", False)
+    keep_channels = payload.get("keep_channels", False)
     if tuner.is_scan_active() and not force:
         return jsonify({
             "success": False,
@@ -405,7 +424,7 @@ def api_scan():
             "message": "Another scan is active and will be canceled if you start a new scan."
         }), 409
     if tuner.is_scan_active() and force:
-        tuner.cancel_scan()
+        tuner.cancel_scan(keep_channels=keep_channels)
     if background:
         thread = threading.Thread(target=tuner.run_scan, daemon=True)
         thread.start()
@@ -413,6 +432,15 @@ def api_scan():
     result = tuner.run_scan()
     tuner.load_channels()
     return jsonify(result)
+
+@app.route("/api/scan/cancel", methods=["POST"])
+def api_scan_cancel():
+    payload = request.get_json(silent=True) or {}
+    keep_channels = payload.get("keep_channels", False)
+    if tuner.is_scan_active():
+        tuner.cancel_scan(keep_channels=keep_channels)
+        return jsonify({"success": True, "canceled": True, "kept": keep_channels})
+    return jsonify({"success": False, "error": "no active scan"}), 400
 
 @app.route("/api/tune/<channel>", methods=["POST"])
 def api_tune(channel):
