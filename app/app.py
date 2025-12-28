@@ -45,8 +45,16 @@ class TVTuner:
     def load_channels(self):
         os.makedirs(os.path.dirname(CHANNELS_JSON), exist_ok=True)
         if os.path.exists(CHANNELS_JSON):
-            with open(CHANNELS_JSON, "r") as f:
-                self.channels = json.load(f)
+            try:
+                with open(CHANNELS_JSON, "r") as f:
+                    content = f.read().strip()
+                    if content:
+                        self.channels = json.loads(content)
+                    else:
+                        self.channels = {}
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Could not load channels.json: {e}")
+                self.channels = {}
         else:
             self.channels = {}
         self._rebuild_order()
