@@ -726,9 +726,9 @@ class TVTuner:
         azap_monitor = threading.Thread(target=monitor_azap, daemon=True)
         azap_monitor.start()
 
-        # Wait for azap to tune and lock
-        logger.info("[STREAM] Waiting for azap to lock to channel...")
-        time.sleep(3)
+        # Wait longer for azap to tune, lock, and stabilize signal
+        logger.info("[STREAM] Waiting for azap to lock and stabilize (7 seconds)...")
+        time.sleep(7)
 
         if self.zap_proc.poll() is not None:
             logger.error(f"[STREAM] azap died with code {self.zap_proc.returncode}")
@@ -745,18 +745,25 @@ class TVTuner:
         )
 
         # Start ffmpeg reading from cat's stdout
+        # Added flags to handle corrupt packets and wait for clean keyframe
         ffmpeg_cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "info",
             "-f", "mpegts",  # Explicitly specify MPEG-TS format
+            "-fflags", "+discardcorrupt+genpts",  # Discard corrupt packets, generate PTS
+            "-analyzeduration", "5000000",  # 5 seconds to analyze stream
+            "-probesize", "10000000",  # 10MB probe size
             "-i", "pipe:0",  # Read from stdin (connected to cat's stdout)
             "-c:v", "copy",  # Copy video codec
             "-c:a", "copy",  # Copy audio codec
+            "-copyts",  # Copy timestamps
+            "-start_at_zero",  # Start timestamps at zero
+            "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
             "-f", "hls",
             "-hls_time", "2",
-            "-hls_list_size", "5",
-            "-hls_flags", "delete_segments+append_list",
+            "-hls_list_size", "10",  # Keep more segments to avoid gaps
+            "-hls_flags", "append_list+omit_endlist",  # Don't delete segments, omit end tag (live stream)
             "-hls_segment_filename", os.path.join(hls_dir, "stream%d.ts"),
             hls_playlist
         ]
