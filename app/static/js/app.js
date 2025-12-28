@@ -136,9 +136,12 @@ function updateUI() {
 
 // Enhanced Scanner Functions
 function showScanModal() {
-    scanModal = new bootstrap.Modal(document.getElementById('scanModal'));
+    scanModal = new bootstrap.Modal(document.getElementById('scanModal'), {
+        backdrop: 'static',  // Prevent closing when clicking outside
+        keyboard: false      // Prevent closing with ESC key
+    });
     scanModal.show();
-    
+
     // Reset modal state
     document.getElementById('scanProgress').style.display = 'none';
     document.getElementById('startScanBtn').style.display = 'block';

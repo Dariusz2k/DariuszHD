@@ -182,14 +182,15 @@ class TVTuner:
             logger.info(f"[SCAN] {line}")
 
             # Parse w_scan output for frequency info
-            if "tuning DVB-T" in line or "tuning" in line:
-                # Extract frequency from line
-                import re
-                freq_match = re.search(r'(\d+)\s*kHz', line)
-                if freq_match:
-                    freq_khz = freq_match.group(1)
-                    freq_mhz = int(freq_khz) / 1000
-                    current_freq = f"{freq_mhz:.1f} MHz"
+            # Matches patterns like "177000:" or "f=177000 kHz" or "177000 kHz"
+            import re
+            freq_match = re.search(r'(?:^|f=)(\d{5,6})\s*:?\s*(?:kHz)?', line)
+            if freq_match:
+                freq_khz = freq_match.group(1)
+                freq_mhz = int(freq_khz) / 1000
+                new_freq = f"{freq_mhz:.1f} MHz"
+                if new_freq != current_freq:  # Only emit if frequency changed
+                    current_freq = new_freq
                     socketio.emit('scan_progress', {
                         'progress': 10,
                         'channels_found': channels_found,
