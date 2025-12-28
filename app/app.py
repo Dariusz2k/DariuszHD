@@ -645,9 +645,10 @@ class TVTuner:
         if not self.tune_channel(channel):
             return False
 
-        # Wait for azap to fully lock the tuner before starting ffmpeg
-        logger.info("[STREAM] Waiting for tuner to stabilize...")
-        time.sleep(2)
+        # Wait for azap to fully lock the tuner and DVR device to start streaming
+        logger.info("[STREAM] Waiting for tuner to stabilize and DVR device to start streaming...")
+        logger.info("[STREAM] This may take 5-10 seconds...")
+        time.sleep(5)
 
         # Kill old ffmpeg; start new one that writes HLS to a temp directory
         self.stop_stream()
