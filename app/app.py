@@ -7,6 +7,7 @@ import os
 import threading
 import time
 import signal
+import re
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'homerun-clone-secret-key'
@@ -37,6 +38,9 @@ class TVTuner:
 
         self.load_channels()
         self.scan_status = {"status": "idle"}
+        self.scan_proc = None
+        self.scan_cancel = threading.Event()
+        self.scan_lock = threading.Lock()
 
     # -------------------------
     # Channels: load/save/sort
@@ -86,24 +90,12 @@ class TVTuner:
             return int(match.group(1))
         return 0
 
-    def scan_channels(self):
+    def scan_channels(self, xml_path):
         """
-        Run w_scan and extract channels into channels.json.
-        w_scan -A 1 -ft -c US -X  (ATSC)
+        Parse w_scan XML output and extract channels into channels.json.
         We'll parse the generated XML enough to get virtual channel + name.
         For surfing, virtual channel is enough.
         """
-        # Write XML to temp then parse
-        xml_path = "/opt/homerun-clone/config/channels.xml"
-        cmd = ["w_scan", "-A", "1", "-ft", "-c", "US", "-X", "-a", str(self.adapter_index)]
-        try:
-            with open(xml_path, "w") as xml_file:
-                r = subprocess.run(cmd, stdout=xml_file, stderr=subprocess.PIPE, text=True)
-        except OSError as e:
-            return {"success": False, "error": f"Failed to run w_scan: {e}"}
-        if r.returncode != 0:
-            return {"success": False, "error": r.stderr or "w_scan failed"}
-
         # Minimal XML parse without extra deps
         # w_scan XML contains <channel> entries with <name> and sometimes <service_id> etc.
         # We'll build a best-effort mapping: "major.minor" -> {"name": "..."}
@@ -153,10 +145,74 @@ class TVTuner:
         self.save_channels()
         return {"success": True, "channels_found": len(self.channels)}
 
+    def cancel_scan(self):
+        self.scan_cancel.set()
+        if self.scan_proc and self.scan_proc.poll() is None:
+            self.scan_proc.terminate()
+            try:
+                self.scan_proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.scan_proc.kill()
+        self.scan_proc = None
+        self.scan_status = {"status": "canceled"}
+
+    def _emit_scan_progress(self, frequency_khz, channels_found):
+        socketio.emit("scan_progress", {
+            "frequency_khz": frequency_khz,
+            "channels_found": channels_found,
+            "progress": 0
+        })
+
     def run_scan(self):
-        self.scan_status = {"status": "running"}
-        socketio.emit("scan_progress", {"progress": 0, "channels_found": 0})
-        result = self.scan_channels()
+        with self.scan_lock:
+            self.scan_status = {"status": "running"}
+            self.scan_cancel.clear()
+            socketio.emit("scan_progress", {"progress": 0, "channels_found": 0})
+
+            xml_path = "/opt/homerun-clone/config/channels.xml"
+            cmd = ["w_scan", "-A", "1", "-ft", "-c", "US", "-X", "-a", str(self.adapter_index)]
+            channels_found = 0
+            frequency_khz = None
+            stderr_output = []
+
+            try:
+                with open(xml_path, "w") as xml_file:
+                    self.scan_proc = subprocess.Popen(
+                        cmd,
+                        stdout=xml_file,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    if self.scan_proc.stderr:
+                        for line in self.scan_proc.stderr:
+                            stderr_output.append(line)
+                            if self.scan_cancel.is_set():
+                                break
+                            line = line.strip()
+                            if not line:
+                                continue
+                            match = re.search(r"(\d+):", line)
+                            if match:
+                                frequency_khz = int(match.group(1))
+                                if "signal ok" in line:
+                                    channels_found += 1
+                                self._emit_scan_progress(frequency_khz, channels_found)
+                    self.scan_proc.wait()
+            except OSError as e:
+                self.scan_proc = None
+                return {"success": False, "error": f"Failed to run w_scan: {e}"}
+
+        if self.scan_cancel.is_set():
+            self.scan_status = {"status": "canceled"}
+            return {"success": False, "error": "Scan canceled"}
+
+        if self.scan_proc.returncode != 0:
+            stderr_text = "".join(stderr_output).strip()
+            self.scan_proc = None
+            return {"success": False, "error": stderr_text or "w_scan failed"}
+
+        self.scan_proc = None
+        result = self.scan_channels(xml_path)
         if result.get("success"):
             self.scan_status = {"status": "complete"}
             result["channels"] = self.channels
@@ -165,6 +221,9 @@ class TVTuner:
             self.scan_status = {"status": "error", "message": result.get("error")}
             socketio.emit("scan_complete", {"success": False, "error": result.get("error")})
         return result
+
+    def is_scan_active(self):
+        return self.scan_proc is not None and self.scan_proc.poll() is None
 
     # -------------------------
     # Tuning
@@ -326,6 +385,15 @@ def favicon():
 def api_scan():
     payload = request.get_json(silent=True) or {}
     background = payload.get("background", False)
+    force = payload.get("force", False)
+    if tuner.is_scan_active() and not force:
+        return jsonify({
+            "success": False,
+            "conflict": True,
+            "message": "Another scan is active and will be canceled if you start a new scan."
+        }), 409
+    if tuner.is_scan_active() and force:
+        tuner.cancel_scan()
     if background:
         thread = threading.Thread(target=tuner.run_scan, daemon=True)
         thread.start()

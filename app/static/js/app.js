@@ -153,23 +153,16 @@ function updateThresholdValue() {
 function startFullScan() {
     const threshold = parseInt(document.getElementById('signalThreshold').value);
     const identifyNames = document.getElementById('identifyNames').checked;
-    
+
     // Show progress UI
     document.getElementById('scanProgress').style.display = 'block';
     document.getElementById('startScanBtn').style.display = 'none';
     
     // Start scan
-    fetch('/api/scan', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            signal_threshold: threshold,
-            identify_names: identifyNames,
-            background: true
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
+    const handleScanStart = (data) => {
+        if (!data || data.conflict) {
+            return;
+        }
         if (!data.success) {
             alert('Failed to start scan: ' + (data.error || 'Unknown error'));
             scanModal.hide();
@@ -182,7 +175,39 @@ function startFullScan() {
             updateScanProgress({progress: 100, channels_found: data.channels_found});
             completeScan({channels_found: data.channels_found, channels: data.channels || {}});
         }
+    };
+
+    fetch('/api/scan', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            signal_threshold: threshold,
+            identify_names: identifyNames,
+            background: true
+        })
     })
+    .then(response => response.json())
+    .then(data => {
+        if (data.conflict) {
+            const proceed = confirm(data.message || 'Another scan is active and will be canceled. Continue?');
+            if (!proceed) {
+                scanModal.hide();
+                return;
+            }
+            return fetch('/api/scan', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    signal_threshold: threshold,
+                    identify_names: identifyNames,
+                    background: true,
+                    force: true
+                })
+            }).then(response => response.json());
+        }
+        return data;
+    })
+    .then(handleScanStart)
     .catch(error => {
         console.error('Scan start error:', error);
         alert('Failed to start scan');
@@ -198,10 +223,13 @@ function updateScanProgress(data) {
     progressBar.style.width = data.progress + '%';
     progressPercent.textContent = data.progress + '%';
     
+    const frequencyText = data.frequency_khz
+        ? `<small class="text-muted">Scanning ${data.frequency_khz} kHz...</small>`
+        : '<small class="text-muted">Scanning frequencies...</small>';
+
+    scanResults.innerHTML = frequencyText;
     if (data.channels_found > 0) {
-        scanResults.innerHTML = `<small class="text-success">Found ${data.channels_found} channels</small>`;
-    } else {
-        scanResults.innerHTML = '<small class="text-muted">Scanning frequencies...</small>';
+        scanResults.innerHTML += `<br><small class="text-success">Found ${data.channels_found} channels</small>`;
     }
 }
 
