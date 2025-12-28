@@ -362,10 +362,18 @@ class TVTuner:
         self.zap_proc = None
 
     def tune_channel(self, channel):
+        logger.info("="*70)
+        logger.info(f"[TUNE] Attempting to tune to channel: {channel}")
+        logger.info(f"[TUNE] Available channels: {list(self.channels.keys())}")
+
         if channel not in self.channels:
+            logger.error(f"[TUNE] Channel {channel} not found in channels list!")
             return False
 
+        logger.info(f"[TUNE] Channel {channel} found: {self.channels[channel]}")
+
         # Stop any existing zap (tune) process
+        logger.info("[TUNE] Stopping any existing zap process...")
         self.stop_zap()
 
         # We need a channels.conf for dvbv5-zap.
@@ -376,21 +384,42 @@ class TVTuner:
         #
         # So: require that channels.zap exists in config dir
         zap_path = os.path.join(CONFIG_DIR, "channels.zap")
+        logger.info(f"[TUNE] Looking for channels.zap at: {zap_path}")
+
         if not os.path.exists(zap_path):
+            logger.warning("[TUNE] channels.zap not found! Generating with w_scan...")
             # Generate it (czap format works for dvbv5-zap)
             os.makedirs(CONFIG_DIR, exist_ok=True)
             cmd = f"w_scan -A 1 -ft -c US -o 1 > {zap_path}"
+            logger.info(f"[TUNE] Running: {cmd}")
             r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             if r.returncode != 0:
-                print("Failed to generate channels.zap:", r.stderr or r.stdout)
+                logger.error(f"[TUNE] Failed to generate channels.zap: {r.stderr or r.stdout}")
+                return False
+            logger.info("[TUNE] channels.zap generated successfully")
+        else:
+            logger.info(f"[TUNE] channels.zap exists ({os.path.getsize(zap_path)} bytes)")
 
         # Start dvbv5-zap in "record" mode so it holds the tuner
         # NOTE: dvbv5-zap expects a channel NAME as listed in channels.zap.
         # Many entries are station names, not "2.1". We'll search for a matching virtual channel string.
+        logger.info(f"[TUNE] Searching for zap entry matching channel {channel}")
         entry_name = self._find_zap_entry_name(zap_path, channel)
+
         if not entry_name:
-            print(f"Could not map virtual channel {channel} to a zap entry name")
+            logger.error(f"[TUNE] Could not map virtual channel {channel} to a zap entry name")
+            logger.info("[TUNE] Showing first 10 lines of channels.zap:")
+            try:
+                with open(zap_path, 'r') as f:
+                    for i, line in enumerate(f):
+                        if i >= 10:
+                            break
+                        logger.info(f"[TUNE]   {line.strip()}")
+            except Exception as e:
+                logger.error(f"[TUNE] Could not read channels.zap: {e}")
             return False
+
+        logger.info(f"[TUNE] Found zap entry: {entry_name}")
 
         cmd = [
             "dvbv5-zap",
@@ -400,8 +429,23 @@ class TVTuner:
             "-r",
             "-q"
         ]
+        logger.info(f"[TUNE] Running dvbv5-zap command: {' '.join(cmd)}")
         self.zap_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        # Wait a moment and check if it's still running
+        time.sleep(0.5)
+        if self.zap_proc.poll() is not None:
+            # Process already died
+            stdout, stderr = self.zap_proc.communicate()
+            logger.error(f"[TUNE] dvbv5-zap exited immediately with code {self.zap_proc.returncode}")
+            logger.error(f"[TUNE] stdout: {stdout}")
+            logger.error(f"[TUNE] stderr: {stderr}")
+            self.zap_proc = None
+            return False
+
         self.current_channel = channel
+        logger.info(f"[TUNE] Successfully tuned to channel {channel}")
+        logger.info("="*70)
         return True
 
     def _find_zap_entry_name(self, zap_path, channel):
