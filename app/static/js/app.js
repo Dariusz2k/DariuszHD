@@ -4,6 +4,11 @@ let currentChannel = null;
 let isStreaming = false;
 let scanModal;
 let scanStatusState = null;
+let broadcastMap;
+let userLocationMarker;
+let broadcastMarkers = [];
+let cachedLocation = null;
+let cachedRegions = [];
 
 // Initialize WebSocket connection
 function initSocket() {
@@ -126,10 +131,11 @@ function updateChannelList(channels) {
         const signalStrength = channelInfo.signal_strength || 0;
         const badgeClass = signalStrength > 70 ? 'success' : signalStrength > 40 ? 'warning' : 'danger';
         
+        const displayName = channelInfo.name || channelId;
         button.innerHTML = `
             <div>
                 <strong>${channelId}</strong><br>
-                <small class="text-muted">${channelInfo.name}</small>
+                <small class="text-muted">${displayName}</small>
             </div>
             ${signalStrength > 0 ? `<span class="badge bg-${badgeClass}">${signalStrength}%</span>` : ''}
         `;
@@ -501,6 +507,7 @@ document.addEventListener('DOMContentLoaded', function() {
     updateThresholdValue();
 
     loadScanRegions();
+    initBroadcastMap();
 });
 
 async function loadScanRegions() {
@@ -518,13 +525,123 @@ async function loadScanRegions() {
             container.innerHTML = '<small class="text-muted">No regions available.</small>';
             return;
         }
+        cachedRegions = data.regions;
         container.innerHTML = data.regions.map((region) => `
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" name="scanRegions" id="region-${region.id}" value="${region.id}">
                 <label class="form-check-label" for="region-${region.id}">${region.name}</label>
             </div>
         `).join('');
+        updateBroadcastMarkers();
     } catch (error) {
         console.error('Failed to load scan regions:', error);
     }
+}
+
+async function loadLocation() {
+    try {
+        const response = await fetch('/api/location');
+        if (!response.ok) {
+            return null;
+        }
+        const data = await response.json();
+        if (!data.latitude || !data.longitude) {
+            return null;
+        }
+        cachedLocation = data;
+        return data;
+    } catch (error) {
+        console.error('Failed to load location:', error);
+        return null;
+    }
+}
+
+function initBroadcastMap() {
+    const mapEl = document.getElementById('broadcastMap');
+    if (!mapEl || typeof L === 'undefined') {
+        return;
+    }
+    broadcastMap = L.map('broadcastMap').setView([42.3, -83.0], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(broadcastMap);
+    updateBroadcastMarkers();
+}
+
+async function updateBroadcastMarkers() {
+    if (!broadcastMap) {
+        return;
+    }
+    const location = cachedLocation || await loadLocation();
+    if (location) {
+        const coords = [location.latitude, location.longitude];
+        if (!userLocationMarker) {
+            userLocationMarker = L.marker(coords).addTo(broadcastMap);
+        } else {
+            userLocationMarker.setLatLng(coords);
+        }
+        userLocationMarker.bindPopup(`You are near ${location.city || 'your area'}`);
+        broadcastMap.setView(coords, 8);
+    }
+
+    broadcastMarkers.forEach(marker => marker.remove());
+    broadcastMarkers = [];
+
+    cachedRegions.forEach(region => {
+        if (!region.latitude || !region.longitude) {
+            return;
+        }
+        const marker = L.marker([region.latitude, region.longitude]).addTo(broadcastMap);
+        marker.bindPopup(`${region.name}`);
+        broadcastMarkers.push(marker);
+        (region.towers || []).forEach(tower => {
+            const towerMarker = L.circleMarker([tower.latitude, tower.longitude], {
+                radius: 6,
+                color: '#0d6efd'
+            }).addTo(broadcastMap);
+            towerMarker.bindPopup(`${tower.name}`);
+            broadcastMarkers.push(towerMarker);
+        });
+    });
+}
+
+async function smartScan() {
+    showScanModal();
+    if (cachedRegions.length === 0) {
+        return;
+    }
+    const location = cachedLocation || await loadLocation();
+    if (!location) {
+        return;
+    }
+    const selectedIds = pickNearbyRegions(location, cachedRegions, 150);
+    document.querySelectorAll('input[name="scanRegions"]').forEach((input) => {
+        input.checked = selectedIds.includes(input.value);
+    });
+}
+
+function pickNearbyRegions(location, regions, maxMiles) {
+    return regions
+        .map(region => ({
+            id: region.id,
+            distance: haversineMiles(
+                location.latitude,
+                location.longitude,
+                region.latitude,
+                region.longitude
+            )
+        }))
+        .filter(entry => entry.distance <= maxMiles)
+        .map(entry => entry.id);
+}
+
+function haversineMiles(lat1, lon1, lat2, lon2) {
+    const toRad = (value) => (value * Math.PI) / 180;
+    const earthRadiusMiles = 3958.8;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return earthRadiusMiles * c;
 }

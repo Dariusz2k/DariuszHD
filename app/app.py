@@ -9,6 +9,9 @@ import time
 import signal
 import re
 import bisect
+import math
+import urllib.request
+import urllib.error
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'homerun-clone-secret-key'
@@ -73,6 +76,8 @@ class TVTuner:
             return (int(major), int(minor))
         except:
             try:
+                if ch.startswith("rf-"):
+                    return (int(ch.replace("rf-", "")), 0)
                 return (int(float(ch)), 0)
             except:
                 return (9999, 9999)
@@ -167,7 +172,13 @@ class TVTuner:
                         if frequency_filter and freq_khz is not None and freq_khz not in frequency_filter:
                             continue
                         # Clean name to station-ish string (optional)
-                        display = name
+                        display = name or vchan
+                        new_channels[vchan] = {"name": display, "frequency_khz": freq_khz}
+                    elif freq_khz is not None:
+                        if frequency_filter and freq_khz not in frequency_filter:
+                            continue
+                        vchan = f"rf-{freq_khz}"
+                        display = name or f"RF {freq_khz / 1000:.3f} MHz"
                         new_channels[vchan] = {"name": display, "frequency_khz": freq_khz}
 
         except Exception as e:
@@ -361,7 +372,7 @@ class TVTuner:
         # Start dvbv5-zap in "record" mode so it holds the tuner
         # NOTE: dvbv5-zap expects a channel NAME as listed in channels.zap.
         # Many entries are station names, not "2.1". We'll search for a matching virtual channel string.
-        entry_name = self._find_zap_entry_name(zap_path, channel)
+        entry_name = self._find_zap_entry_name(zap_path, channel, self.channels[channel])
         if not entry_name:
             print(f"Could not map virtual channel {channel} to a zap entry name")
             return False
@@ -378,7 +389,7 @@ class TVTuner:
         self.current_channel = channel
         return True
 
-    def _find_zap_entry_name(self, zap_path, channel):
+    def _find_zap_entry_name(self, zap_path, channel, channel_info):
         """
         channels.zap lines look like:
           NAME:freq:...
@@ -388,6 +399,16 @@ class TVTuner:
         try:
             with open(zap_path, "r", errors="ignore") as f:
                 lines = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+            frequency_khz = channel_info.get("frequency_khz")
+            if frequency_khz is not None:
+                for ln in lines:
+                    parts = ln.split(":")
+                    if len(parts) > 1:
+                        try:
+                            if int(parts[1]) == int(frequency_khz):
+                                return parts[0]
+                        except ValueError:
+                            continue
             # First, exact contains "2.1"
             for ln in lines:
                 name = ln.split(":", 1)[0]
@@ -479,6 +500,21 @@ def api_status():
 @app.route("/api/scan/regions")
 def api_scan_regions():
     return jsonify({"regions": tuner._load_regions()})
+
+@app.route("/api/location")
+def api_location():
+    try:
+        with urllib.request.urlopen("https://ipapi.co/json/", timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            return jsonify({
+                "latitude": data.get("latitude"),
+                "longitude": data.get("longitude"),
+                "city": data.get("city"),
+                "region": data.get("region"),
+                "country": data.get("country_name"),
+            })
+    except (urllib.error.URLError, json.JSONDecodeError):
+        return jsonify({"error": "Unable to determine location"}), 502
 
 @app.route("/favicon.ico")
 def favicon():

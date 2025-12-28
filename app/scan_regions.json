@@ -2,6 +2,16 @@
   {
     "id": "detroit",
     "name": "Detroit, MI",
+    "latitude": 42.3487,
+    "longitude": -83.0986,
+    "towers": [
+      {
+        "name": "Southfield/Oak Park Towers",
+        "latitude": 42.4656,
+        "longitude": -83.2219,
+        "frequencies_khz": [69000, 177000, 473000, 485000, 545000, 581000, 647000, 659000]
+      }
+    ],
     "frequencies_khz": [
       69000,
       177000,
@@ -16,6 +26,16 @@
   {
     "id": "lansing",
     "name": "Lansing, MI",
+    "latitude": 42.7335,
+    "longitude": -84.5555,
+    "towers": [
+      {
+        "name": "Lansing Broadcast Cluster",
+        "latitude": 42.7756,
+        "longitude": -84.5521,
+        "frequencies_khz": [177000, 195000, 521000, 539000, 599000, 617000, 635000]
+      }
+    ],
     "frequencies_khz": [
       177000,
       195000,

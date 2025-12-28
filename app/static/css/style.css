@@ -64,3 +64,9 @@
 .scan-region-options .form-check {
     margin-bottom: 0.25rem;
 }
+
+#broadcastMap {
+    height: 260px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
