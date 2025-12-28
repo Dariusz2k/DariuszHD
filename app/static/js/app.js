@@ -392,7 +392,11 @@ async function quickScan() {
 
 async function tuneChannel(channel) {
     try {
-        const response = await fetch(`/api/tune/${channel}`);
+        const response = await fetch(`/api/tune/${channel}`, {method: 'POST'});
+        if (!response.ok) {
+            alert('Failed to tune channel');
+            return;
+        }
         const data = await response.json();
         
         if (data.success) {

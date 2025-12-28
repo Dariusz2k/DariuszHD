@@ -533,6 +533,10 @@ def api_location():
 def favicon():
     return ("", 204)
 
+@app.route("/css/fonts/<path:filename>")
+def missing_fonts(filename):
+    return ("", 204)
+
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
     payload = request.get_json(silent=True) or {}
