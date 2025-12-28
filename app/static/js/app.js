@@ -153,11 +153,12 @@ function updateThresholdValue() {
 function startFullScan() {
     const threshold = parseInt(document.getElementById('signalThreshold').value);
     const identifyNames = document.getElementById('identifyNames').checked;
-    
+
     // Show progress UI
     document.getElementById('scanProgress').style.display = 'block';
     document.getElementById('startScanBtn').style.display = 'none';
-    
+    document.getElementById('cancelScanBtn').style.display = 'block';
+
     // Start scan
     fetch('/api/scan', {
         method: 'POST',
@@ -171,8 +172,13 @@ function startFullScan() {
     .then(response => response.json())
     .then(data => {
         if (!data.success) {
-            alert('Failed to start scan: ' + (data.error || 'Unknown error'));
-            scanModal.hide();
+            if (data.can_cancel) {
+                // Scan already in progress, show cancel button
+                document.getElementById('cancelScanBtn').style.display = 'block';
+            } else {
+                alert('Failed to start scan: ' + (data.error || 'Unknown error'));
+                scanModal.hide();
+            }
         }
     })
     .catch(error => {
@@ -182,30 +188,60 @@ function startFullScan() {
     });
 }
 
+function cancelScan() {
+    if (!confirm('Are you sure you want to cancel the scan?')) {
+        return;
+    }
+
+    fetch('/api/scan/cancel', {method: 'POST'})
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('scanResults').innerHTML = '<small class="text-warning">Cancelling scan...</small>';
+        }
+    })
+    .catch(error => {
+        console.error('Cancel error:', error);
+    });
+}
+
 function updateScanProgress(data) {
     const progressBar = document.getElementById('progressBar');
     const progressPercent = document.getElementById('progressPercent');
     const scanResults = document.getElementById('scanResults');
-    
+
     progressBar.style.width = data.progress + '%';
     progressPercent.textContent = data.progress + '%';
-    
+
+    let statusText = '';
+    if (data.status) {
+        statusText = `<div class="text-info mb-1"><strong>${data.status}</strong></div>`;
+    }
+
     if (data.channels_found > 0) {
-        scanResults.innerHTML = `<small class="text-success">Found ${data.channels_found} channels</small>`;
+        scanResults.innerHTML = statusText + `<small class="text-success">Found ${data.channels_found} services</small>`;
     } else {
-        scanResults.innerHTML = '<small class="text-muted">Scanning frequencies...</small>';
+        scanResults.innerHTML = statusText + '<small class="text-muted">Scanning frequencies...</small>';
     }
 }
 
 function completeScan(data) {
     const scanResults = document.getElementById('scanResults');
     const finishBtn = document.getElementById('finishScanBtn');
-    
-    scanResults.innerHTML = `<small class="text-success">✓ Scan complete! Found ${data.channels_found} channels</small>`;
-    finishBtn.style.display = 'block';
-    
-    // Update the channel list with new channels
-    updateChannelList(data.channels);
+    const cancelBtn = document.getElementById('cancelScanBtn');
+
+    cancelBtn.style.display = 'none';
+
+    if (data.success) {
+        scanResults.innerHTML = `<small class="text-success">✓ Scan complete! Found ${data.channels_found} channels</small>`;
+        finishBtn.style.display = 'block';
+
+        // Update the channel list with new channels
+        updateChannelList(data.channels);
+    } else {
+        scanResults.innerHTML = `<small class="text-danger">✗ ${data.error || 'Scan failed'}</small>`;
+        finishBtn.style.display = 'block';
+    }
 }
 
 function finishScan() {

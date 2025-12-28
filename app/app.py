@@ -60,7 +60,9 @@ class TVTuner:
         self.ffmpeg_proc = None
 
         self.scan_thread = None
+        self.scan_proc = None  # Track the w_scan process for cancellation
         self.scanning = False
+        self.scan_cancelled = False
 
         self.load_channels()
 
@@ -135,25 +137,87 @@ class TVTuner:
             return self._scan_demo_mode()
 
         logger.info("[SCAN] Emitting progress: 10%")
-        socketio.emit('scan_progress', {'progress': 10, 'channels_found': 0})
+        socketio.emit('scan_progress', {'progress': 10, 'channels_found': 0, 'status': 'Starting scan...'})
 
-        # Run w_scan (this takes a while - typically 5-10 minutes)
+        # Run w_scan with real-time output monitoring
         cmd = f"w_scan -A 1 -ft -c US -X > {xml_path}"
         logger.info(f"[SCAN] Running w_scan command: {cmd}")
-        logger.info("[SCAN] *** This will take 5-10 minutes, please wait... ***")
-        logger.info("[SCAN] w_scan is scanning all TV frequencies...")
+        logger.info("[SCAN] *** This will take 5-10 minutes, monitoring progress... ***")
 
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
+        # Start w_scan and monitor its output in real-time
+        self.scan_proc = subprocess.Popen(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1
+        )
 
-        logger.info(f"[SCAN] w_scan completed with return code: {r.returncode}")
-        logger.info(f"[SCAN] w_scan stdout length: {len(r.stdout)} chars")
-        logger.info(f"[SCAN] w_scan stderr length: {len(r.stderr)} chars")
+        channels_found = 0
+        current_freq = ""
+
+        # Monitor stderr in real-time (w_scan outputs to stderr)
+        while True:
+            if self.scan_cancelled:
+                logger.warning("[SCAN] Scan cancelled by user!")
+                self.scan_proc.terminate()
+                try:
+                    self.scan_proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self.scan_proc.kill()
+                self.scanning = False
+                self.scan_cancelled = False
+                socketio.emit('scan_complete', {'success': False, 'error': 'Scan cancelled', 'channels_found': 0, 'channels': {}})
+                return {"success": False, "error": "Scan cancelled"}
+
+            line = self.scan_proc.stderr.readline()
+            if not line:
+                break
+
+            line = line.strip()
+            if not line:
+                continue
+
+            logger.info(f"[SCAN] {line}")
+
+            # Parse w_scan output for frequency info
+            if "tuning DVB-T" in line or "tuning" in line:
+                # Extract frequency from line
+                import re
+                freq_match = re.search(r'(\d+)\s*kHz', line)
+                if freq_match:
+                    freq_khz = freq_match.group(1)
+                    freq_mhz = int(freq_khz) / 1000
+                    current_freq = f"{freq_mhz:.1f} MHz"
+                    socketio.emit('scan_progress', {
+                        'progress': 10,
+                        'channels_found': channels_found,
+                        'status': f'Scanning {current_freq}'
+                    })
+
+            # Parse w_scan output for found services/channels
+            if "service" in line.lower() or ">>>" in line:
+                channels_found += 1
+                logger.info(f"[SCAN] Found service #{channels_found}")
+                socketio.emit('scan_progress', {
+                    'progress': 10,
+                    'channels_found': channels_found,
+                    'status': f'Found {channels_found} services at {current_freq}'
+                })
+
+        # Wait for process to complete
+        self.scan_proc.wait()
+        returncode = self.scan_proc.returncode
+
+        logger.info(f"[SCAN] w_scan completed with return code: {returncode}")
+        logger.info(f"[SCAN] Found {channels_found} services during scan")
         logger.info("[SCAN] Emitting progress: 70%")
-        socketio.emit('scan_progress', {'progress': 70, 'channels_found': 0})
+        socketio.emit('scan_progress', {'progress': 70, 'channels_found': channels_found, 'status': 'Parsing results...'})
 
-        if r.returncode != 0:
+        if returncode != 0 and not self.scan_cancelled:
             self.scanning = False
-            error_msg = r.stderr or r.stdout or "w_scan failed"
+            error_msg = "w_scan failed with non-zero exit code"
             socketio.emit('scan_complete', {'success': False, 'error': error_msg, 'channels_found': 0, 'channels': {}})
             return {"success": False, "error": error_msg}
 
@@ -427,16 +491,32 @@ def api_scan():
 
     if tuner.scanning:
         logger.warning("[API] ERROR: Scan already in progress")
-        return jsonify({"success": False, "error": "Scan already in progress"})
+        return jsonify({"success": False, "error": "Scan already in progress", "can_cancel": True})
 
     # Start scan in background thread
     logger.info("[API] Starting background thread for scan...")
+    tuner.scan_cancelled = False
     tuner.scan_thread = threading.Thread(target=tuner.scan_channels_background, daemon=True)
     tuner.scan_thread.start()
     logger.info(f"[API] Background thread started: {tuner.scan_thread}")
     logger.info("="*70)
 
     return jsonify({"success": True, "message": "Scan started"})
+
+@app.route("/api/scan/cancel", methods=["POST"])
+def api_scan_cancel():
+    """Cancel an active scan"""
+    logger.warning("="*70)
+    logger.warning("[API] /api/scan/cancel endpoint called")
+
+    if not tuner.scanning:
+        logger.warning("[API] No scan in progress to cancel")
+        return jsonify({"success": False, "error": "No scan in progress"})
+
+    logger.warning("[API] Cancelling active scan...")
+    tuner.scan_cancelled = True
+
+    return jsonify({"success": True, "message": "Scan cancellation requested"})
 
 @app.route("/api/tune/<channel>", methods=["GET", "POST"])
 def api_tune(channel):
