@@ -367,7 +367,7 @@ async function startStream() {
                     enableWorker: true,
                     // Live streaming configuration - start from live edge to skip corrupt initial segments
                     liveSyncDurationCount: 3,  // Start 3 segments from live edge
-                    liveMaxLatencyDuration: 10,  // Max 10s latency before catching up
+                    liveMaxLatencyDurationCount: 5,  // Max 5 segments latency before catching up
                     maxBufferLength: 30,  // Buffer 30 seconds ahead
                     maxMaxBufferLength: 60,  // Max 60 seconds buffer
                     backBufferLength: 30  // Keep 30 seconds for rewinding
