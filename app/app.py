@@ -57,6 +57,7 @@ class TVTuner:
         self.current_channel = None
 
         self.zap_proc = None
+        self.cat_proc = None
         self.ffmpeg_proc = None
 
         self.scan_thread = None
@@ -641,6 +642,14 @@ class TVTuner:
                 self.ffmpeg_proc.kill()
         self.ffmpeg_proc = None
 
+        if self.cat_proc and self.cat_proc.poll() is None:
+            self.cat_proc.terminate()
+            try:
+                self.cat_proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.cat_proc.kill()
+        self.cat_proc = None
+
     def start_stream(self, channel):
         """
         Stream a channel using ffmpeg with piped input from azap.
@@ -691,12 +700,12 @@ class TVTuner:
             except:
                 pass
 
-        # Start azap with output to stdout (remove -r to avoid DVR device, use -p for PAT/PMT)
+        # Start azap with -r to write to DVR device
         azap_cmd = [
             "azap",
             "-a", adapter_num,
             "-c", zap_path,
-            "-p",  # PAT/PMT processing
+            "-r",  # Record mode - writes to DVR device
             entry_name
         ]
 
@@ -705,27 +714,43 @@ class TVTuner:
             azap_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=False  # Binary mode for stream data
+            text=True
         )
 
-        # Wait for azap to tune and lock (check stderr for "lock" message)
+        # Start monitoring azap's stderr to check for lock
+        def monitor_azap():
+            if self.zap_proc and self.zap_proc.stderr:
+                for line in self.zap_proc.stderr:
+                    logger.info(f"[AZAP] {line.strip()}")
+
+        azap_monitor = threading.Thread(target=monitor_azap, daemon=True)
+        azap_monitor.start()
+
+        # Wait for azap to tune and lock
         logger.info("[STREAM] Waiting for azap to lock to channel...")
-        time.sleep(2)
+        time.sleep(3)
 
         if self.zap_proc.poll() is not None:
-            stdout, stderr = self.zap_proc.communicate()
-            logger.error(f"[STREAM] azap died immediately with code {self.zap_proc.returncode}")
-            logger.error(f"[STREAM] stderr: {stderr.decode() if stderr else 'none'}")
+            logger.error(f"[STREAM] azap died with code {self.zap_proc.returncode}")
             self.zap_proc = None
             return False
 
-        # Start ffmpeg reading from azap's stdout via pipe
+        # Use cat to read from DVR device and pipe to ffmpeg
+        # This creates: azap -> /dev/dvb/adapter0/dvr0 -> cat -> ffmpeg
+        logger.info(f"[STREAM] Starting cat to read from {self.dvr}")
+        self.cat_proc = subprocess.Popen(
+            ["cat", self.dvr],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+
+        # Start ffmpeg reading from cat's stdout
         ffmpeg_cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "info",
             "-f", "mpegts",  # Explicitly specify MPEG-TS format
-            "-i", "pipe:0",  # Read from stdin (will be connected to azap's stdout)
+            "-i", "pipe:0",  # Read from stdin (connected to cat's stdout)
             "-c:v", "copy",  # Copy video codec
             "-c:a", "copy",  # Copy audio codec
             "-f", "hls",
@@ -737,19 +762,19 @@ class TVTuner:
         ]
 
         logger.info(f"[STREAM] Starting ffmpeg: {' '.join(ffmpeg_cmd)}")
-        logger.info("[STREAM] Piping azap stdout -> ffmpeg stdin")
+        logger.info(f"[STREAM] Pipeline: azap -> {self.dvr} -> cat -> ffmpeg")
 
         self.ffmpeg_proc = subprocess.Popen(
             ffmpeg_cmd,
-            stdin=self.zap_proc.stdout,  # Connect to azap's stdout
+            stdin=self.cat_proc.stdout,  # Connect to cat's stdout
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True
         )
 
-        # Allow azap to write to pipe (close our reference)
-        if self.zap_proc.stdout:
-            self.zap_proc.stdout.close()
+        # Allow cat to write to pipe (close our reference)
+        if self.cat_proc.stdout:
+            self.cat_proc.stdout.close()
 
         # Start a thread to monitor ffmpeg stderr
         def monitor_ffmpeg():
