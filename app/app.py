@@ -444,6 +444,18 @@ class TVTuner:
             logger.error(f"[TUNE] azap exited immediately with code {self.zap_proc.returncode}")
             logger.error(f"[TUNE] stdout: {stdout}")
             logger.error(f"[TUNE] stderr: {stderr}")
+
+            # Debug: Show what's actually in the zap file
+            logger.error("[TUNE] Debugging: First 5 lines of channels.zap:")
+            try:
+                with open(zap_path, 'r') as f:
+                    for i, line in enumerate(f):
+                        if i >= 5:
+                            break
+                        logger.error(f"[TUNE]   Line {i+1}: {repr(line.strip())}")
+            except Exception as e:
+                logger.error(f"[TUNE] Could not read channels.zap: {e}")
+
             self.zap_proc = None
             return False
 
