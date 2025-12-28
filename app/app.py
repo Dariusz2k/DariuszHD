@@ -134,12 +134,21 @@ class TVTuner:
             logger.info("[SCAN] w_scan NOT found - switching to DEMO MODE")
             return self._scan_demo_mode()
 
+        logger.info("[SCAN] Emitting progress: 10%")
         socketio.emit('scan_progress', {'progress': 10, 'channels_found': 0})
 
-        # Run w_scan (this takes a while)
+        # Run w_scan (this takes a while - typically 5-10 minutes)
         cmd = f"w_scan -A 1 -ft -c US -X > {xml_path}"
+        logger.info(f"[SCAN] Running w_scan command: {cmd}")
+        logger.info("[SCAN] *** This will take 5-10 minutes, please wait... ***")
+        logger.info("[SCAN] w_scan is scanning all TV frequencies...")
+
         r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=300)
 
+        logger.info(f"[SCAN] w_scan completed with return code: {r.returncode}")
+        logger.info(f"[SCAN] w_scan stdout length: {len(r.stdout)} chars")
+        logger.info(f"[SCAN] w_scan stderr length: {len(r.stderr)} chars")
+        logger.info("[SCAN] Emitting progress: 70%")
         socketio.emit('scan_progress', {'progress': 70, 'channels_found': 0})
 
         if r.returncode != 0:
