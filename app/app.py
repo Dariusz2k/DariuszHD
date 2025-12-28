@@ -755,7 +755,6 @@ class TVTuner:
             "-i", "pipe:0",  # Read from stdin (connected to cat's stdout)
             "-c", "copy",  # Stream copy - no re-encoding!
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
-            "-bsf:v", "h264_mp4toannexb",  # Convert H.264 to Annex-B format for HLS
             "-f", "hls",
             "-hls_time", "2",
             "-hls_list_size", "10",  # Keep more segments to avoid gaps
