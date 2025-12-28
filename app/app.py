@@ -688,6 +688,25 @@ class TVTuner:
             return False
 
         logger.info("[STREAM] ffmpeg started successfully and is running")
+        logger.info(f"[STREAM] Waiting for HLS playlist to be created...")
+
+        # Wait for the playlist file to be created and have valid content
+        max_wait = 10  # Maximum 10 seconds
+        for i in range(max_wait):
+            if os.path.exists(hls_playlist):
+                try:
+                    with open(hls_playlist, 'r') as f:
+                        content = f.read()
+                        if content.startswith('#EXTM3U'):
+                            logger.info(f"[STREAM] HLS playlist ready after {i+1} seconds")
+                            break
+                except:
+                    pass
+            time.sleep(1)
+        else:
+            logger.error(f"[STREAM] HLS playlist not ready after {max_wait} seconds")
+            # Continue anyway, it might work
+
         logger.info(f"[STREAM] HLS files will be created in: {hls_dir}")
         return True
 
