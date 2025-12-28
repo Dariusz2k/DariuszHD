@@ -231,8 +231,21 @@ class TVTuner:
                         "status": "canceled",
                         "channels_found": result.get("channels_found", 0),
                     }
-                    socketio.emit("scan_complete", {"success": True, **result, "canceled": True})
-                    return {"success": True, "canceled": True, **result}
+                    socketio.emit(
+                        "scan_complete",
+                        {
+                            "success": True,
+                            "canceled": True,
+                            "channels_found": result.get("channels_found", 0),
+                            "channels": self.channels,
+                        },
+                    )
+                    return {
+                        "success": True,
+                        "canceled": True,
+                        "channels_found": result.get("channels_found", 0),
+                        "channels": self.channels,
+                    }
             return {"success": False, "error": "Scan canceled"}
 
         if self.scan_proc.returncode != 0:
@@ -246,7 +259,14 @@ class TVTuner:
             self.scan_status = {"status": "complete"}
             self._emit_scan_progress(frequency_khz, result.get("channels_found", 0), 100)
             result["channels"] = self.channels
-            socketio.emit("scan_complete", result)
+            socketio.emit(
+                "scan_complete",
+                {
+                    "success": True,
+                    "channels_found": result.get("channels_found", 0),
+                    "channels": self.channels,
+                },
+            )
         else:
             self.scan_status = {"status": "error", "message": result.get("error")}
             socketio.emit("scan_complete", {"success": False, "error": result.get("error")})

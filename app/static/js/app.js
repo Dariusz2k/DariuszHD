@@ -274,14 +274,19 @@ function completeScan(data) {
     if (data.canceled) {
         scanResults.innerHTML = `<small class="text-warning">Scan canceled. Found ${data.channels_found || 0} channels</small>`;
     } else {
-        scanResults.innerHTML = `<small class="text-success">✓ Scan complete! Found ${data.channels_found} channels</small>`;
+        const foundCount = data.channels_found !== undefined
+            ? data.channels_found
+            : (data.channels ? Object.keys(data.channels).length : 0);
+        scanResults.innerHTML = `<small class="text-success">✓ Scan complete! Found ${foundCount} channels</small>`;
     }
     finishBtn.style.display = 'block';
     document.getElementById('cancelScanBtn').style.display = 'none';
     updateScanFloatingButton({status: 'complete'});
-    
+
     // Update the channel list with new channels
-    updateChannelList(data.channels);
+    if (data.channels) {
+        updateChannelList(data.channels);
+    }
 }
 
 function finishScan() {
