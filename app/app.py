@@ -761,10 +761,11 @@ class TVTuner:
             "-c:a", "aac",  # Transcode AC-3 to AAC for browser support
             "-b:a", "128k",  # 128kbps audio bitrate
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
+            "-mpegts_flags", "+resend_headers",  # Ensure PAT/PMT at each segment start
             "-f", "hls",
             "-hls_time", "2",
             "-hls_list_size", "10",  # Keep more segments to avoid gaps
-            "-hls_flags", "delete_segments+append_list+omit_endlist+temp_file",  # Delete old segments, publish only complete segments
+            "-hls_flags", "delete_segments+append_list+omit_endlist+temp_file+independent_segments",  # Delete old segments, publish only complete/keyframe segments
             "-hls_segment_filename", os.path.join(hls_dir, "stream%d.ts"),
             hls_playlist
         ]
