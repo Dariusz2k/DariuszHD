@@ -645,8 +645,13 @@ class TVTuner:
         if not self.tune_channel(channel):
             return False
 
+        # Wait for azap to fully lock the tuner before starting ffmpeg
+        logger.info("[STREAM] Waiting for tuner to stabilize...")
+        time.sleep(2)
+
         # Kill old ffmpeg; start new one that writes MPEG-TS to stdout
         self.stop_stream()
+        logger.info(f"[STREAM] Starting ffmpeg to read from {self.dvr}")
         cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -657,6 +662,7 @@ class TVTuner:
             "pipe:1"
         ]
         self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        logger.info("[STREAM] ffmpeg started successfully")
         return True
 
     def surf(self, direction):
