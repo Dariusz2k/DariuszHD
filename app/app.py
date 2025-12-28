@@ -745,7 +745,7 @@ class TVTuner:
         )
 
         # Start ffmpeg reading from cat's stdout
-        # Added flags to handle corrupt packets and wait for clean keyframe
+        # Re-encode to eliminate ALL corrupt packets (copy mode preserves corruption)
         ffmpeg_cmd = [
             "ffmpeg",
             "-hide_banner",
@@ -755,10 +755,12 @@ class TVTuner:
             "-analyzeduration", "5000000",  # 5 seconds to analyze stream
             "-probesize", "10000000",  # 10MB probe size
             "-i", "pipe:0",  # Read from stdin (connected to cat's stdout)
-            "-c:v", "copy",  # Copy video codec
-            "-c:a", "copy",  # Copy audio codec
-            "-copyts",  # Copy timestamps
-            "-start_at_zero",  # Start timestamps at zero
+            # Re-encode video and audio for clean output (CPU intensive but necessary)
+            "-c:v", "libx264",  # Re-encode video with H.264
+            "-preset", "ultrafast",  # Fastest encoding (suitable for RPI4)
+            "-crf", "23",  # Quality level (lower = better, 23 is good)
+            "-c:a", "aac",  # Re-encode audio with AAC
+            "-b:a", "128k",  # Audio bitrate
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
             "-f", "hls",
             "-hls_time", "2",
