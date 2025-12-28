@@ -649,17 +649,28 @@ class TVTuner:
         logger.info("[STREAM] Waiting for tuner to stabilize...")
         time.sleep(2)
 
-        # Kill old ffmpeg; start new one that writes MPEG-TS to stdout
+        # Kill old ffmpeg; start new one that writes HLS to a temp directory
         self.stop_stream()
+
+        # Create HLS output directory
+        hls_dir = os.path.join(CONFIG_DIR, "hls")
+        os.makedirs(hls_dir, exist_ok=True)
+        hls_playlist = os.path.join(hls_dir, "stream.m3u8")
+
         logger.info(f"[STREAM] Starting ffmpeg to read from {self.dvr}")
+        logger.info(f"[STREAM] HLS output: {hls_playlist}")
+
         cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "error",
             "-i", self.dvr,
             "-c", "copy",
-            "-f", "mpegts",
-            "pipe:1"
+            "-f", "hls",
+            "-hls_time", "2",
+            "-hls_list_size", "3",
+            "-hls_flags", "delete_segments",
+            hls_playlist
         ]
         self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         logger.info("[STREAM] ffmpeg started successfully")
@@ -783,11 +794,17 @@ def api_surf(direction):
     ok = tuner.start_stream(target)
     return jsonify({"success": ok, "channel": target})
 
+@app.route("/hls/<path:filename>")
+def serve_hls(filename):
+    """Serve HLS playlist and segments"""
+    from flask import send_from_directory
+    hls_dir = os.path.join(CONFIG_DIR, "hls")
+    return send_from_directory(hls_dir, filename)
+
 @app.route("/stream.ts")
 def stream_ts():
     """
-    Serve the MPEG-TS stream from ffmpeg stdout.
-    Client must have started /api/play/<channel> first.
+    Legacy MPEG-TS stream endpoint (deprecated - use HLS instead)
     """
     if not tuner.ffmpeg_proc or tuner.ffmpeg_proc.stdout is None:
         return ("Stream not running", 404)

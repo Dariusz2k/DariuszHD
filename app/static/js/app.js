@@ -322,6 +322,9 @@ async function surfPrev() {
 
 
 
+// Global HLS instance
+let hls = null;
+
 async function startStream() {
     if (!currentChannel) {
         alert('Please select a channel first');
@@ -336,11 +339,61 @@ async function startStream() {
             isStreaming = true;
             updateUI();
 
-            // Update video source
+            // Initialize HLS player
             const video = document.getElementById('videoPlayer');
-            video.src = `/stream.ts?channel=${currentChannel}&t=${Date.now()}`;
-            video.load();
-            video.play();
+            const hlsUrl = `/hls/stream.m3u8?t=${Date.now()}`;
+
+            if (Hls.isSupported()) {
+                // Clean up existing HLS instance
+                if (hls) {
+                    hls.destroy();
+                }
+
+                hls = new Hls({
+                    debug: false,
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 90
+                });
+
+                hls.loadSource(hlsUrl);
+                hls.attachMedia(video);
+
+                hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                    console.log('HLS manifest loaded, starting playback');
+                    video.play().catch(err => {
+                        console.error('Autoplay failed:', err);
+                    });
+                });
+
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    console.error('HLS error:', data);
+                    if (data.fatal) {
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                console.error('Fatal network error, trying to recover');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                console.error('Fatal media error, trying to recover');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                console.error('Fatal error, cannot recover');
+                                hls.destroy();
+                                break;
+                        }
+                    }
+                });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = hlsUrl;
+                video.addEventListener('loadedmetadata', function() {
+                    video.play();
+                });
+            } else {
+                alert('HLS is not supported in your browser');
+            }
         } else {
             alert('Failed to start stream');
         }
@@ -358,6 +411,12 @@ async function stopStream() {
         if (data.success) {
             isStreaming = false;
             updateUI();
+
+            // Clean up HLS instance
+            if (hls) {
+                hls.destroy();
+                hls = null;
+            }
 
             const video = document.getElementById('videoPlayer');
             video.pause();
