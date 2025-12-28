@@ -267,6 +267,10 @@ class TVTuner:
         returncode = self.scan_proc.returncode
         zap_file.close()  # Close the zap file now that w_scan has finished
 
+        # Convert w_scan format to azap-compatible format
+        logger.info("[SCAN] Converting channels.zap to azap-compatible format...")
+        self._convert_to_azap_format(zap_path)
+
         logger.info(f"[SCAN] w_scan completed with return code: {returncode}")
         logger.info(f"[SCAN] Found {channels_found} services during scan")
         logger.info(f"[SCAN] Parsed {len(new_channels)} channels from scan output")
@@ -463,6 +467,61 @@ class TVTuner:
         logger.info(f"[TUNE] Successfully tuned to channel {channel}")
         logger.info("="*70)
         return True
+
+    def _convert_to_azap_format(self, zap_path):
+        """
+        Convert w_scan's native output format to azap-compatible format.
+
+        w_scan format:  WJBK   ;(null):177000:M10:A:0:49:52=eng...
+        azap format:    WJBK:177000000:8VSB
+
+        Fields:
+        - Channel name (before semicolon, trimmed)
+        - Frequency in Hz (w_scan outputs kHz, multiply by 1000)
+        - Modulation (8VSB for ATSC)
+        """
+        try:
+            with open(zap_path, 'r') as f:
+                lines = f.readlines()
+
+            converted_lines = []
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                # Parse w_scan format: NAME;source:freq:modulation:...
+                parts = line.split(':')
+                if len(parts) < 3:
+                    logger.warning(f"[SCAN] Skipping malformed line: {line[:50]}")
+                    continue
+
+                # Extract channel name (before semicolon)
+                name_part = parts[0].split(';')[0].strip()
+
+                # Extract frequency (in kHz, convert to Hz)
+                try:
+                    freq_khz = int(parts[1])
+                    freq_hz = freq_khz * 1000
+                except (ValueError, IndexError):
+                    logger.warning(f"[SCAN] Could not parse frequency from: {line[:50]}")
+                    continue
+
+                # For ATSC, modulation is always 8VSB
+                modulation = "8VSB"
+
+                # Create azap format line
+                azap_line = f"{name_part}:{freq_hz}:{modulation}"
+                converted_lines.append(azap_line)
+
+            # Write back to file
+            with open(zap_path, 'w') as f:
+                f.write('\n'.join(converted_lines) + '\n')
+
+            logger.info(f"[SCAN] Converted {len(converted_lines)} channels to azap format")
+
+        except Exception as e:
+            logger.error(f"[SCAN] Failed to convert to azap format: {e}")
 
     def _find_zap_entry_by_name(self, zap_path, station_name):
         """
