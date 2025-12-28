@@ -168,6 +168,10 @@ function showScanModal() {
     document.getElementById('startScanBtn').style.display = 'block';
     document.getElementById('finishScanBtn').style.display = 'none';
     document.getElementById('cancelScanBtn').style.display = 'none';
+    const foundCount = document.getElementById('foundChannelsCount');
+    if (foundCount) {
+        foundCount.textContent = '0';
+    }
 
     if (scanStatusState && scanStatusState.status === 'running') {
         document.getElementById('scanProgress').style.display = 'block';
@@ -203,6 +207,10 @@ function startFullScan() {
         const scanResults = document.getElementById('scanResults');
         if (data.background) {
             scanResults.innerHTML = '<small class="text-muted">Scanning frequencies...</small>';
+            const foundCount = document.getElementById('foundChannelsCount');
+            if (foundCount) {
+                foundCount.textContent = '0';
+            }
         } else if (data.channels_found !== undefined) {
             updateScanProgress({progress: 100, channels_found: data.channels_found});
             completeScan({channels_found: data.channels_found, channels: data.channels || {}});
@@ -252,10 +260,14 @@ function updateScanProgress(data) {
     const progressBar = document.getElementById('progressBar');
     const progressPercent = document.getElementById('progressPercent');
     const scanResults = document.getElementById('scanResults');
+    const foundCount = document.getElementById('foundChannelsCount');
     
     const progressValue = data.progress !== undefined ? data.progress : 0;
     progressBar.style.width = progressValue + '%';
     progressPercent.textContent = progressValue + '%';
+    if (foundCount) {
+        foundCount.textContent = data.channels_found || 0;
+    }
     
     const frequencyText = data.frequency_khz
         ? `<small class="text-muted">Scanning ${data.frequency_khz} kHz...</small>`
@@ -270,14 +282,21 @@ function updateScanProgress(data) {
 function completeScan(data) {
     const scanResults = document.getElementById('scanResults');
     const finishBtn = document.getElementById('finishScanBtn');
+    const foundCountEl = document.getElementById('foundChannelsCount');
 
     if (data.canceled) {
         scanResults.innerHTML = `<small class="text-warning">Scan canceled. Found ${data.channels_found || 0} channels</small>`;
+        if (foundCountEl) {
+            foundCountEl.textContent = data.channels_found || 0;
+        }
     } else {
         const foundCount = data.channels_found !== undefined
             ? data.channels_found
             : (data.channels ? Object.keys(data.channels).length : 0);
         scanResults.innerHTML = `<small class="text-success">✓ Scan complete! Found ${foundCount} channels</small>`;
+        if (foundCountEl) {
+            foundCountEl.textContent = foundCount;
+        }
     }
     finishBtn.style.display = 'block';
     document.getElementById('cancelScanBtn').style.display = 'none';
