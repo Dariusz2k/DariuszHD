@@ -199,6 +199,18 @@ class TVTuner:
             })
         return result
 
+    def add_frequency_channel(self, frequency_khz):
+        channel_key = f"rf-{frequency_khz}"
+        if channel_key in self.channels:
+            return False
+        display = f"RF {frequency_khz / 1000:.3f} MHz"
+        self.channels[channel_key] = {
+            "name": display,
+            "frequency_khz": frequency_khz
+        }
+        self.save_channels()
+        return True
+
     def cancel_scan(self, keep_channels=False):
         self.keep_partial_scan = keep_channels
         self.scan_cancel.set()
@@ -272,6 +284,7 @@ class TVTuner:
                                     )
                                 if "signal ok" in line:
                                     channels_found += 1
+                                    self.add_frequency_channel(frequency_khz)
                                     self.refresh_channels_from_xml(xml_path, self.scan_frequency_set or None)
                                 self._emit_scan_progress(frequency_khz, channels_found, progress)
                     self.scan_proc.wait()

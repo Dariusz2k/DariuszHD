@@ -618,6 +618,7 @@ async function smartScan() {
     document.querySelectorAll('input[name="scanRegions"]').forEach((input) => {
         input.checked = selectedIds.includes(input.value);
     });
+    startFullScan();
 }
 
 function pickNearbyRegions(location, regions, maxMiles) {
