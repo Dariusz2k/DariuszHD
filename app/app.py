@@ -402,9 +402,12 @@ class TVTuner:
 
         # Start dvbv5-zap in "record" mode so it holds the tuner
         # NOTE: dvbv5-zap expects a channel NAME as listed in channels.zap.
-        # Many entries are station names, not "2.1". We'll search for a matching virtual channel string.
-        logger.info(f"[TUNE] Searching for zap entry matching channel {channel}")
-        entry_name = self._find_zap_entry_name(zap_path, channel)
+        # The zap file has station names like "WJBK", not virtual channels like "2.1"
+        # So we look up the station name from our channels dict
+        station_name = self.channels[channel].get("name", "")
+        logger.info(f"[TUNE] Channel {channel} has station name: {station_name}")
+        logger.info(f"[TUNE] Searching for zap entry matching station: {station_name}")
+        entry_name = self._find_zap_entry_by_name(zap_path, station_name)
 
         if not entry_name:
             logger.error(f"[TUNE] Could not map virtual channel {channel} to a zap entry name")
@@ -448,8 +451,51 @@ class TVTuner:
         logger.info("="*70)
         return True
 
+    def _find_zap_entry_by_name(self, zap_path, station_name):
+        """
+        channels.zap lines in dvbv5 format look like:
+          WJBK   ;(null):177000:M10:A:0:...
+        Extract the station name before the semicolon and match against station_name
+        """
+        try:
+            with open(zap_path, "r", errors="ignore") as f:
+                lines = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+
+            logger.info(f"[TUNE] Searching through {len(lines)} zap entries")
+
+            # Try exact match first (case-insensitive, stripped)
+            for ln in lines:
+                # dvbv5 format: NAME;source:freq:...
+                # czap format: NAME:freq:...
+                if ';' in ln:
+                    name = ln.split(";", 1)[0].strip()
+                else:
+                    name = ln.split(":", 1)[0].strip()
+
+                if name.lower() == station_name.lower():
+                    logger.info(f"[TUNE] Exact match found: {name}")
+                    return name
+
+            # Try contains match (for cases like "WJBK-DT" vs "WJBK")
+            for ln in lines:
+                if ';' in ln:
+                    name = ln.split(";", 1)[0].strip()
+                else:
+                    name = ln.split(":", 1)[0].strip()
+
+                if station_name.lower() in name.lower() or name.lower() in station_name.lower():
+                    logger.info(f"[TUNE] Partial match found: {name}")
+                    return name
+
+            logger.warning(f"[TUNE] No match found for station: {station_name}")
+        except Exception as e:
+            logger.error(f"[TUNE] Error searching zap file: {e}")
+            return None
+        return None
+
     def _find_zap_entry_name(self, zap_path, channel):
         """
+        DEPRECATED: Old method that searched by channel number
         channels.zap lines look like:
           NAME:freq:...
         We try to find a line whose NAME contains "2.1" etc, otherwise fallback to first match by major.
