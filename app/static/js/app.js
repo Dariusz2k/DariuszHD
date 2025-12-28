@@ -281,6 +281,9 @@ function updateScanProgress(data) {
     if (data.channels_found > 0) {
         scanResults.innerHTML += `<br><small class="text-success">Found ${data.channels_found} channels</small>`;
     }
+    if (data.channels) {
+        updateChannelList(data.channels);
+    }
 }
 
 function completeScan(data) {

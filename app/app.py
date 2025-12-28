@@ -177,6 +177,17 @@ class TVTuner:
         self.save_channels()
         return {"success": True, "channels_found": len(self.channels)}
 
+    def refresh_channels_from_xml(self, xml_path, frequency_filter=None):
+        result = self.scan_channels(xml_path, frequency_filter)
+        if result.get("success"):
+            socketio.emit("scan_progress", {
+                "channels_found": result.get("channels_found", 0),
+                "channels": self.channels,
+                "progress": self.scan_status.get("progress", 0),
+                "frequency_khz": self.scan_status.get("frequency_khz"),
+            })
+        return result
+
     def cancel_scan(self, keep_channels=False):
         self.keep_partial_scan = keep_channels
         self.scan_cancel.set()
@@ -250,6 +261,7 @@ class TVTuner:
                                     )
                                 if "signal ok" in line:
                                     channels_found += 1
+                                    self.refresh_channels_from_xml(xml_path, self.scan_frequency_set or None)
                                 self._emit_scan_progress(frequency_khz, channels_found, progress)
                     self.scan_proc.wait()
             except OSError as e:
