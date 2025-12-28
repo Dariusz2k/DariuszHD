@@ -663,7 +663,7 @@ class TVTuner:
         cmd = [
             "ffmpeg",
             "-hide_banner",
-            "-loglevel", "error",
+            "-loglevel", "info",  # Changed from error to info for debugging
             "-i", self.dvr,
             "-c", "copy",
             "-f", "hls",
@@ -672,8 +672,22 @@ class TVTuner:
             "-hls_flags", "delete_segments",
             hls_playlist
         ]
-        self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        logger.info("[STREAM] ffmpeg started successfully")
+
+        logger.info(f"[STREAM] ffmpeg command: {' '.join(cmd)}")
+        self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        # Wait a moment and check if ffmpeg is still running
+        time.sleep(1)
+        if self.ffmpeg_proc.poll() is not None:
+            stdout, stderr = self.ffmpeg_proc.communicate()
+            logger.error(f"[STREAM] ffmpeg died immediately with code {self.ffmpeg_proc.returncode}")
+            logger.error(f"[STREAM] stdout: {stdout}")
+            logger.error(f"[STREAM] stderr: {stderr}")
+            self.ffmpeg_proc = None
+            return False
+
+        logger.info("[STREAM] ffmpeg started successfully and is running")
+        logger.info(f"[STREAM] HLS files will be created in: {hls_dir}")
         return True
 
     def surf(self, direction):
