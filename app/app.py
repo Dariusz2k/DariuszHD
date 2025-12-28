@@ -745,24 +745,21 @@ class TVTuner:
         )
 
         # Start ffmpeg reading from cat's stdout
-        # Use RPI4 hardware H.264 encoder for real-time performance
+        # Use stream copy (no re-encoding) for instant remuxing to HLS
         ffmpeg_cmd = [
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "info",
             "-f", "mpegts",  # Explicitly specify MPEG-TS format
-            "-fflags", "+discardcorrupt+genpts+nobuffer",  # Discard corrupt packets, no buffering
+            "-fflags", "+discardcorrupt+genpts+igndts",  # Discard corrupt packets, ignore DTS
             "-i", "pipe:0",  # Read from stdin (connected to cat's stdout)
-            # Use RPI4 hardware encoder (h264_v4l2m2m) for fast real-time encoding
-            "-c:v", "h264_v4l2m2m",  # Hardware H.264 encoder (RPI4)
-            "-b:v", "4M",  # Video bitrate
-            "-c:a", "aac",  # Re-encode audio with AAC
-            "-b:a", "128k",  # Audio bitrate
+            "-c", "copy",  # Stream copy - no re-encoding!
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
+            "-bsf:v", "h264_mp4toannexb",  # Convert H.264 to Annex-B format for HLS
             "-f", "hls",
             "-hls_time", "2",
             "-hls_list_size", "10",  # Keep more segments to avoid gaps
-            "-hls_flags", "append_list+omit_endlist",  # Don't delete segments, omit end tag (live stream)
+            "-hls_flags", "delete_segments+append_list+omit_endlist",  # Delete old segments
             "-hls_segment_filename", os.path.join(hls_dir, "stream%d.ts"),
             hls_playlist
         ]
@@ -804,9 +801,9 @@ class TVTuner:
         logger.info(f"[STREAM] Building DVR buffer (optimized startup)...")
         logger.info(f"[STREAM] This allows clean playback and rewind capability")
 
-        # Wait for initial playlist creation (reduced from 10s to 5s)
+        # Wait for initial playlist creation
         playlist_ready = False
-        for i in range(5):
+        for i in range(10):
             if os.path.exists(hls_playlist):
                 try:
                     with open(hls_playlist, 'r') as f:
@@ -819,16 +816,13 @@ class TVTuner:
             time.sleep(1)
 
         if not playlist_ready:
-            logger.error("[STREAM] HLS playlist not created after 5 seconds")
+            logger.error("[STREAM] HLS playlist not created after 10 seconds")
             return False
 
-        # Now wait 5 seconds to build DVR buffer (optimized with fast startup)
-        # This ensures:
-        # 1. Stream has fully stabilized (no more corrupt packets)
-        # 2. We have enough segments for smooth playback
-        # 3. User can rewind/pause like a traditional DVR
-        logger.info("[STREAM] Buffering segments for DVR functionality...")
-        buffer_time = 5
+        # Wait briefly for first segment (no re-encoding = nearly instant)
+        # With stream copy, segments are created in real-time without processing delay
+        logger.info("[STREAM] Waiting for first segment...")
+        buffer_time = 3
         for i in range(buffer_time):
             time.sleep(1)
             # Log progress at end of buffer
