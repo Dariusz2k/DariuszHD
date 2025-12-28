@@ -332,15 +332,28 @@ async function startStream() {
     }
 
     try {
+        // Show buffering message
+        const video = document.getElementById('videoPlayer');
+        const bufferingMsg = document.createElement('div');
+        bufferingMsg.id = 'bufferingMessage';
+        bufferingMsg.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; border-radius: 10px; font-size: 18px; z-index: 1000;';
+        bufferingMsg.innerHTML = '<i class="bi bi-hourglass-split"></i> Building DVR buffer...<br><small>Please wait 20 seconds</small>';
+        video.parentElement.style.position = 'relative';
+        video.parentElement.appendChild(bufferingMsg);
+
         const response = await fetch(`/api/stream/${currentChannel}`, {method: 'POST'});
         const data = await response.json();
+
+        // Remove buffering message
+        if (bufferingMsg.parentElement) {
+            bufferingMsg.remove();
+        }
 
         if (data.success) {
             isStreaming = true;
             updateUI();
 
-            // Initialize HLS player
-            const video = document.getElementById('videoPlayer');
+            // Initialize HLS player with DVR mode
             const hlsUrl = `/hls/stream.m3u8?t=${Date.now()}`;
 
             if (Hls.isSupported()) {
@@ -352,17 +365,26 @@ async function startStream() {
                 hls = new Hls({
                     debug: false,
                     enableWorker: true,
-                    lowLatencyMode: true,
-                    backBufferLength: 90
+                    // DVR Mode Configuration
+                    liveSyncDuration: 0,  // Start from beginning, not live edge
+                    liveMaxLatencyDuration: Infinity,  // Allow unlimited buffering
+                    maxBufferLength: 60,  // Buffer up to 60 seconds
+                    maxMaxBufferLength: 120,  // Max buffer 2 minutes
+                    backBufferLength: 90,  // Keep 90 seconds of back buffer for rewinding
+                    liveDurationInfinity: true  // Treat as DVR-capable live stream
                 });
 
                 hls.loadSource(hlsUrl);
                 hls.attachMedia(video);
 
                 hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                    console.log('HLS manifest loaded, starting playback');
+                    console.log('HLS manifest loaded (DVR mode), starting from beginning');
+                    // Start playback from the beginning of the buffer
+                    video.currentTime = 0;
                     video.play().catch(err => {
                         console.error('Autoplay failed:', err);
+                        // Show click-to-play message if autoplay blocked
+                        alert('Click the video to start playback');
                     });
                 });
 
@@ -389,6 +411,7 @@ async function startStream() {
                 // Native HLS support (Safari)
                 video.src = hlsUrl;
                 video.addEventListener('loadedmetadata', function() {
+                    video.currentTime = 0;  // Start from beginning
                     video.play();
                 });
             } else {
@@ -399,6 +422,9 @@ async function startStream() {
         }
     } catch (error) {
         console.error('Stream start error:', error);
+        // Remove buffering message on error
+        const bufferingMsg = document.getElementById('bufferingMessage');
+        if (bufferingMsg) bufferingMsg.remove();
         alert('Failed to start stream: ' + error.message);
     }
 }

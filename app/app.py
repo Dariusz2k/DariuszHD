@@ -802,41 +802,70 @@ class TVTuner:
             return False
 
         logger.info("[STREAM] ffmpeg started successfully")
-        logger.info(f"[STREAM] Waiting for HLS playlist to be created...")
+        logger.info(f"[STREAM] Building DVR buffer (20 seconds)...")
+        logger.info(f"[STREAM] This allows clean playback and rewind capability")
 
-        # Wait for the playlist file to be created and have valid content
-        max_wait = 15  # Increased to 15 seconds
-        for i in range(max_wait):
+        # Wait for initial playlist creation
+        playlist_ready = False
+        for i in range(10):
             if os.path.exists(hls_playlist):
                 try:
                     with open(hls_playlist, 'r') as f:
-                        content = f.read()
-                        if content.startswith('#EXTM3U') and '.ts' in content:
-                            # Verify at least one segment exists
-                            segment_match = re.search(r'stream\d+\.ts', content)
-                            if segment_match:
-                                segment_file = os.path.join(hls_dir, segment_match.group(0))
-                                if os.path.exists(segment_file) and os.path.getsize(segment_file) > 0:
-                                    logger.info(f"[STREAM] HLS playlist ready after {i+1} seconds")
-                                    logger.info(f"[STREAM] First segment: {segment_match.group(0)} ({os.path.getsize(segment_file)} bytes)")
-                                    self.current_channel = channel
-                                    logger.info("="*70)
-                                    return True
-                except Exception as e:
-                    logger.warning(f"[STREAM] Error checking playlist: {e}")
+                        if f.read().startswith('#EXTM3U'):
+                            playlist_ready = True
+                            logger.info(f"[STREAM] HLS playlist created after {i+1} seconds")
+                            break
+                except:
+                    pass
             time.sleep(1)
 
-        logger.error(f"[STREAM] HLS playlist not ready after {max_wait} seconds")
+        if not playlist_ready:
+            logger.error("[STREAM] HLS playlist not created after 10 seconds")
+            return False
 
-        # Debug: Check what files exist
-        if os.path.exists(hls_dir):
-            files = os.listdir(hls_dir)
-            logger.error(f"[STREAM] HLS directory contains: {files}")
-            for f in files:
-                fpath = os.path.join(hls_dir, f)
-                if os.path.isfile(fpath):
-                    logger.error(f"[STREAM]   {f}: {os.path.getsize(fpath)} bytes")
+        # Now wait 20 seconds to build DVR buffer
+        # This ensures:
+        # 1. Stream has fully stabilized (no more corrupt packets)
+        # 2. We have enough segments for smooth playback
+        # 3. User can rewind/pause like a traditional DVR
+        logger.info("[STREAM] Buffering segments for DVR functionality...")
+        buffer_time = 20
+        for i in range(buffer_time):
+            time.sleep(1)
+            # Check segment count every 5 seconds
+            if (i + 1) % 5 == 0:
+                try:
+                    with open(hls_playlist, 'r') as f:
+                        content = f.read()
+                        segment_count = content.count('.ts')
+                        logger.info(f"[STREAM] Buffer progress: {i+1}/{buffer_time}s - {segment_count} segments")
+                except:
+                    pass
 
+        # Verify we have segments
+        try:
+            with open(hls_playlist, 'r') as f:
+                content = f.read()
+                segment_count = content.count('.ts')
+                if segment_count < 5:
+                    logger.warning(f"[STREAM] Only {segment_count} segments after buffering")
+                else:
+                    logger.info(f"[STREAM] DVR buffer ready with {segment_count} segments")
+        except Exception as e:
+            logger.error(f"[STREAM] Error reading final playlist: {e}")
+
+        # Get first segment info for logging
+        try:
+            segments = [f for f in os.listdir(hls_dir) if f.startswith('stream') and f.endswith('.ts')]
+            if segments:
+                first_segment = sorted(segments)[0]
+                segment_size = os.path.getsize(os.path.join(hls_dir, first_segment))
+                logger.info(f"[STREAM] First segment: {first_segment} ({segment_size} bytes)")
+        except:
+            pass
+
+        self.current_channel = channel
+        logger.info("[STREAM] Stream ready! Playback will start from beginning of buffer")
         logger.info("="*70)
         return True
 
