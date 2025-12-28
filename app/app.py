@@ -473,7 +473,7 @@ class TVTuner:
         Convert w_scan's native output format to azap-compatible format.
 
         w_scan format:  WJBK   ;(null):177000:M10:A:0:49:52=eng,53=spa;52,53:0:0:3:0:0:0
-        azap format:    WJBK:177000000:8VSB:49:52
+        azap format:    WJBK:177000000:8VSB:49:52:3
 
         Fields:
         - Channel name (before semicolon, trimmed)
@@ -481,6 +481,7 @@ class TVTuner:
         - Modulation (8VSB for ATSC)
         - Video PID (from w_scan field 6)
         - Audio PID (first audio PID from w_scan field 7)
+        - Service ID (from w_scan field 10)
         """
         try:
             with open(zap_path, 'r') as f:
@@ -492,9 +493,9 @@ class TVTuner:
                 if not line or line.startswith('#'):
                     continue
 
-                # Parse w_scan format: NAME;source:freq:modulation:...:vpid:apid:...
+                # Parse w_scan format: NAME;source:freq:modulation:...:vpid:apid:...:sid:...
                 parts = line.split(':')
-                if len(parts) < 7:
+                if len(parts) < 10:
                     logger.warning(f"[SCAN] Skipping malformed line (not enough fields): {line[:50]}")
                     continue
 
@@ -531,11 +532,18 @@ class TVTuner:
                     logger.warning(f"[SCAN] Could not parse audio PID from: {line[:50]}")
                     continue
 
+                # Extract service ID (field 10)
+                try:
+                    service_id = int(parts[9].strip())
+                except (ValueError, IndexError):
+                    logger.warning(f"[SCAN] Could not parse service ID from: {line[:50]}")
+                    continue
+
                 # For ATSC, modulation is always 8VSB
                 modulation = "8VSB"
 
-                # Create azap format line: NAME:FREQ:MOD:VPID:APID
-                azap_line = f"{name_part}:{freq_hz}:{modulation}:{video_pid}:{audio_pid}"
+                # Create azap format line: NAME:FREQ:MOD:VPID:APID:SID
+                azap_line = f"{name_part}:{freq_hz}:{modulation}:{video_pid}:{audio_pid}:{service_id}"
                 converted_lines.append(azap_line)
 
             # Write back to file
@@ -550,7 +558,7 @@ class TVTuner:
     def _find_zap_entry_by_name(self, zap_path, station_name):
         """
         channels.zap lines in azap format look like:
-          WJBK:177000000:8VSB:49:52
+          WJBK:177000000:8VSB:49:52:3
         Extract the station name before the first colon and match against station_name
         """
         try:
