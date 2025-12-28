@@ -218,11 +218,23 @@ function updateScanProgress(data) {
 
     let statusText = '';
     if (data.status) {
-        statusText = `<div class="text-info mb-1"><strong>${data.status}</strong></div>`;
+        statusText = `<div class="text-info mb-2"><strong>${data.status}</strong></div>`;
     }
 
     if (data.channels_found > 0) {
-        scanResults.innerHTML = statusText + `<small class="text-success">Found ${data.channels_found} services</small>`;
+        let channelsText = `<div class="text-success mb-2"><strong>Total: ${data.channels_found} services</strong></div>`;
+
+        // Show recently found channels
+        if (data.recent_channels && data.recent_channels.length > 0) {
+            channelsText += '<div class="mt-2"><small class="text-muted d-block mb-1">Recently found:</small>';
+            channelsText += '<div style="max-height: 150px; overflow-y: auto;">';
+            data.recent_channels.forEach(channel => {
+                channelsText += `<div class="text-success mb-1" style="font-size: 0.9rem;"><strong>✓</strong> ${channel}</div>`;
+            });
+            channelsText += '</div></div>';
+        }
+
+        scanResults.innerHTML = statusText + channelsText;
     } else {
         scanResults.innerHTML = statusText + '<small class="text-muted">Scanning frequencies...</small>';
     }

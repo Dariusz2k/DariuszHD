@@ -159,6 +159,7 @@ class TVTuner:
 
         channels_found = 0
         current_freq = ""
+        recent_channels = []  # Track recently found channels
 
         # Monitor stderr in real-time (w_scan outputs to stderr)
         while True:
@@ -198,18 +199,40 @@ class TVTuner:
                     socketio.emit('scan_progress', {
                         'progress': 10,
                         'channels_found': channels_found,
-                        'status': f'Scanning {current_freq}'
+                        'status': f'Scanning {current_freq}',
+                        'recent_channels': recent_channels[-5:]  # Last 5 channels
                     })
 
             # Parse w_scan output for found services/channels
-            if "service" in line.lower() or ">>>" in line:
+            # Format: "service is running. Channel number: 2:1. Name: 'WJBK   '"
+            if "service is running" in line.lower():
                 channels_found += 1
-                logger.info(f"[SCAN] Found service #{channels_found}")
-                socketio.emit('scan_progress', {
-                    'progress': 10,
-                    'channels_found': channels_found,
-                    'status': f'Found {channels_found} services at {current_freq}'
-                })
+
+                # Extract channel number and name
+                channel_match = re.search(r'Channel number:\s*(\d+):(\d+)\.\s*Name:\s*["\']([^"\']+)["\']', line)
+                if channel_match:
+                    major = channel_match.group(1)
+                    minor = channel_match.group(2)
+                    name = channel_match.group(3).strip()
+                    channel_display = f"{major}.{minor} {name}"
+                    recent_channels.append(channel_display)
+                    logger.info(f"[SCAN] Found service #{channels_found}: {channel_display}")
+
+                    socketio.emit('scan_progress', {
+                        'progress': 10,
+                        'channels_found': channels_found,
+                        'status': f'Found: {channel_display}',
+                        'recent_channels': recent_channels[-5:]  # Last 5 channels
+                    })
+                else:
+                    # Fallback if parsing fails
+                    logger.info(f"[SCAN] Found service #{channels_found}")
+                    socketio.emit('scan_progress', {
+                        'progress': 10,
+                        'channels_found': channels_found,
+                        'status': f'Found {channels_found} services at {current_freq}',
+                        'recent_channels': recent_channels[-5:]
+                    })
 
         # Wait for process to complete
         self.scan_proc.wait()
