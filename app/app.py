@@ -318,6 +318,10 @@ def api_status():
         "scan_status": tuner.scan_status,
     })
 
+@app.route("/favicon.ico")
+def favicon():
+    return ("", 204)
+
 @app.route("/api/scan", methods=["POST"])
 def api_scan():
     payload = request.get_json(silent=True) or {}

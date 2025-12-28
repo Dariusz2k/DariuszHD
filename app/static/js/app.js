@@ -328,6 +328,10 @@ async function stopStream() {
 setInterval(async () => {
     try {
         const response = await fetch('/api/status');
+        if (!response.ok) {
+            console.warn('Status endpoint returned', response.status);
+            return;
+        }
         const data = await response.json();
         updateChannelInfo(data);
     } catch (error) {
