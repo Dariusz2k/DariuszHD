@@ -155,8 +155,7 @@ class TVTuner:
                 self.scan_proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 self.scan_proc.kill()
-        self.scan_proc = None
-        self.scan_status = {"status": "canceled"}
+        # Let run_scan finalize cleanup, emit events, and persist channels.
 
     def _emit_scan_progress(self, frequency_khz, channels_found, progress):
         self.scan_status = {
@@ -175,7 +174,6 @@ class TVTuner:
         with self.scan_lock:
             self.scan_status = {"status": "running"}
             self.scan_cancel.clear()
-            self.keep_partial_scan = False
             socketio.emit("scan_progress", {"progress": 0, "channels_found": 0})
 
             xml_path = "/opt/homerun-clone/config/channels.xml"
@@ -224,6 +222,7 @@ class TVTuner:
 
         if self.scan_cancel.is_set():
             self.scan_status = {"status": "canceled"}
+            self.scan_proc = None
             if self.keep_partial_scan:
                 result = self.scan_channels(xml_path)
                 if result.get("success"):
@@ -248,7 +247,7 @@ class TVTuner:
                     }
             return {"success": False, "error": "Scan canceled"}
 
-        if self.scan_proc.returncode != 0:
+        if not self.scan_proc or self.scan_proc.returncode != 0:
             stderr_text = "".join(stderr_output).strip()
             self.scan_proc = None
             return {"success": False, "error": stderr_text or "w_scan failed"}
@@ -445,6 +444,7 @@ def api_scan():
         }), 409
     if tuner.is_scan_active() and force:
         tuner.cancel_scan(keep_channels=keep_channels)
+    tuner.keep_partial_scan = False
     if background:
         thread = threading.Thread(target=tuner.run_scan, daemon=True)
         thread.start()
