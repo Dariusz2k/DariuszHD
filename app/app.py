@@ -764,7 +764,7 @@ class TVTuner:
             "-f", "hls",
             "-hls_time", "2",
             "-hls_list_size", "10",  # Keep more segments to avoid gaps
-            "-hls_flags", "delete_segments+append_list+omit_endlist",  # Delete old segments
+            "-hls_flags", "delete_segments+append_list+omit_endlist+temp_file",  # Delete old segments, publish only complete segments
             "-hls_segment_filename", os.path.join(hls_dir, "stream%d.ts"),
             hls_playlist
         ]
@@ -1025,4 +1025,3 @@ if __name__ == "__main__":
     logger.info("Starting SocketIO server on 0.0.0.0:5000")
     logger.info("Access the app at: http://localhost:5000")
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
-
