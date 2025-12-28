@@ -241,6 +241,21 @@ class TVTuner:
 
         logger.info(f"[SCAN] w_scan completed with return code: {returncode}")
         logger.info(f"[SCAN] Found {channels_found} services during scan")
+
+        # Diagnostic logging for XML file
+        if os.path.exists(xml_path):
+            file_size = os.path.getsize(xml_path)
+            logger.info(f"[SCAN] XML file exists at: {xml_path}")
+            logger.info(f"[SCAN] XML file size: {file_size} bytes")
+            if file_size > 0:
+                with open(xml_path, 'r') as f:
+                    first_lines = ''.join(f.readlines()[:5])
+                    logger.info(f"[SCAN] First lines of XML:\n{first_lines}")
+            else:
+                logger.error("[SCAN] XML file is empty!")
+        else:
+            logger.error(f"[SCAN] XML file does not exist at: {xml_path}")
+
         logger.info("[SCAN] Emitting progress: 70%")
         socketio.emit('scan_progress', {'progress': 70, 'channels_found': channels_found, 'status': 'Parsing results...'})
 
