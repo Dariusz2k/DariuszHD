@@ -119,7 +119,7 @@ class TVTuner:
         self.scanning = True
 
         logger.info("[SCAN] Emitting progress: 0%")
-        socketio.emit('scan_progress', {'progress': 0, 'channels_found': 0}, broadcast=True)
+        socketio.emit('scan_progress', {'progress': 0, 'channels_found': 0})
 
         # Write XML to temp then parse
         xml_path = os.path.join(CONFIG_DIR, "channels.xml")
@@ -219,7 +219,7 @@ class TVTuner:
             import traceback
             traceback.print_exc()
             self.scanning = False
-            socketio.emit('scan_complete', {'success': False, 'error': str(e), 'channels_found': 0, 'channels': {}}, broadcast=True)
+            socketio.emit('scan_complete', {'success': False, 'error': str(e), 'channels_found': 0, 'channels': {}})
 
     def _scan_demo_mode(self):
         """Demo mode scan for testing without hardware"""
@@ -247,7 +247,7 @@ class TVTuner:
             progress = int((i + 1) / total * 100)
             logger.info(f"[DEMO] Progress: {progress}% - Found channel {channel}: {info['name']}")
             logger.info(f"[DEMO] Emitting scan_progress event: progress={progress}, channels_found={i+1}")
-            socketio.emit('scan_progress', {'progress': progress, 'channels_found': i + 1}, broadcast=True)
+            socketio.emit('scan_progress', {'progress': progress, 'channels_found': i + 1})
             time.sleep(0.5)  # Simulate scanning time
 
         logger.info("[DEMO] Saving channels to JSON...")
@@ -257,10 +257,10 @@ class TVTuner:
         logger.info(f"[DEMO] Saved {len(self.channels)} channels to {CHANNELS_JSON}")
 
         logger.info("[DEMO] Emitting final progress (100%)")
-        socketio.emit('scan_progress', {'progress': 100, 'channels_found': len(self.channels)}, broadcast=True)
+        socketio.emit('scan_progress', {'progress': 100, 'channels_found': len(self.channels)})
 
         logger.info("[DEMO] Emitting scan_complete event")
-        socketio.emit('scan_complete', {'success': True, 'channels_found': len(self.channels), 'channels': self.channels}, broadcast=True)
+        socketio.emit('scan_complete', {'success': True, 'channels_found': len(self.channels), 'channels': self.channels})
 
         logger.info("[DEMO] Demo scan COMPLETE!")
         logger.info("="*70)
