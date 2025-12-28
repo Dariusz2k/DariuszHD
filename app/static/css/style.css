@@ -70,3 +70,22 @@
     border-radius: 8px;
     border: 1px solid #dee2e6;
 }
+
+.guide-list,
+.schedule-list {
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 0.5rem;
+    background: #fff;
+}
+
+.guide-item {
+    border-bottom: 1px solid #e9ecef;
+    padding: 0.5rem 0;
+}
+
+.guide-item:last-child {
+    border-bottom: none;
+}

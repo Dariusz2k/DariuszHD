@@ -103,6 +103,49 @@
                         <small class="text-muted d-block mt-2">Use Smart Scan to auto-select nearby regions.</small>
                     </div>
                 </div>
+
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h6 class="mb-0">TV Guide</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="guideList" class="guide-list">
+                            <small class="text-muted">Loading guide data...</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h6 class="mb-0">DVR Schedule</h6>
+                    </div>
+                    <div class="card-body">
+                        <form id="dvrForm" class="row g-2">
+                            <div class="col-md-4">
+                                <label class="form-label">Channel</label>
+                                <select class="form-select" id="dvrChannel"></select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Start Time</label>
+                                <input type="datetime-local" class="form-control" id="dvrStartTime">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Duration (min)</label>
+                                <input type="number" class="form-control" id="dvrDuration" min="1" value="30">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Title</label>
+                                <input type="text" class="form-control" id="dvrTitle" placeholder="Optional">
+                            </div>
+                            <div class="col-12">
+                                <button type="button" class="btn btn-sm btn-primary" onclick="addSchedule()">Add to DVR</button>
+                            </div>
+                        </form>
+                        <div id="scheduleList" class="schedule-list mt-3">
+                            <small class="text-muted">Loading schedule...</small>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -12,6 +12,8 @@ import bisect
 import math
 import urllib.request
 import urllib.error
+import uuid
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'homerun-clone-secret-key'
@@ -19,6 +21,9 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 CHANNELS_JSON = "/opt/homerun-clone/config/channels.json"
 REGION_DATA_PATH = os.path.join(os.path.dirname(__file__), "scan_regions.json")
+GUIDE_XML = "/opt/homerun-clone/config/guide.xml"
+DVR_SCHEDULE_JSON = "/opt/homerun-clone/config/dvr_schedule.json"
+RECORDINGS_DIR = "/opt/homerun-clone/recordings"
 
 class TVTuner:
     """
@@ -40,6 +45,7 @@ class TVTuner:
 
         self.zap_proc = None
         self.ffmpeg_proc = None
+        self.recording_proc = None
 
         self.load_channels()
         self.scan_status = {"status": "idle"}
@@ -392,7 +398,7 @@ class TVTuner:
 
         cmd = [
             "dvbv5-zap",
-            "-a", self.frontend,
+            "-a", str(self.adapter_index),
             "-c", zap_path,
             entry_name,
             "-r",
@@ -473,6 +479,30 @@ class TVTuner:
         self.ffmpeg_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return True
 
+    def start_recording(self, channel, duration_seconds, title):
+        if self.recording_proc and self.recording_proc.poll() is None:
+            return False, "Recording already in progress"
+        if not self.tune_channel(channel):
+            return False, "Failed to tune channel"
+
+        os.makedirs(RECORDINGS_DIR, exist_ok=True)
+        safe_title = re.sub(r"[^a-zA-Z0-9_\-]+", "_", title or channel)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        filename = f"{safe_title}_{timestamp}.ts"
+        file_path = os.path.join(RECORDINGS_DIR, filename)
+
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", self.dvr,
+            "-t", str(duration_seconds),
+            "-c", "copy",
+            file_path
+        ]
+        self.recording_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return True, file_path
+
     def surf(self, direction):
         if not self.channel_order:
             self._rebuild_order()
@@ -492,6 +522,91 @@ class TVTuner:
         return target
 
 tuner = TVTuner()
+schedule_lock = threading.Lock()
+schedule_items = []
+
+def load_schedule():
+    global schedule_items
+    if os.path.exists(DVR_SCHEDULE_JSON):
+        with open(DVR_SCHEDULE_JSON, "r") as f:
+            schedule_items = json.load(f)
+    else:
+        schedule_items = []
+
+def save_schedule():
+    os.makedirs(os.path.dirname(DVR_SCHEDULE_JSON), exist_ok=True)
+    with open(DVR_SCHEDULE_JSON, "w") as f:
+        json.dump(schedule_items, f, indent=2)
+
+def parse_xmltv_datetime(value):
+    if not value:
+        return None
+    try:
+        value = value.strip()
+        dt = datetime.strptime(value[:14], "%Y%m%d%H%M%S")
+        return dt.replace(tzinfo=timezone.utc).isoformat()
+    except ValueError:
+        return None
+
+def load_guide():
+    if not os.path.exists(GUIDE_XML):
+        return {"channels": [], "programs": [], "error": "Guide file not found"}
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(GUIDE_XML)
+    root = tree.getroot()
+    channels = []
+    programs = []
+    for ch in root.findall("channel"):
+        ch_id = ch.get("id")
+        display = ch.findtext("display-name") or ch_id
+        channels.append({"id": ch_id, "name": display})
+    for prog in root.findall("programme"):
+        channel_id = prog.get("channel")
+        start = parse_xmltv_datetime(prog.get("start"))
+        stop = parse_xmltv_datetime(prog.get("stop"))
+        title = prog.findtext("title") or "Untitled"
+        desc = prog.findtext("desc") or ""
+        programs.append({
+            "channel_id": channel_id,
+            "start": start,
+            "stop": stop,
+            "title": title,
+            "description": desc
+        })
+    return {"channels": channels, "programs": programs}
+
+def schedule_worker():
+    while True:
+        now = datetime.now(timezone.utc)
+        with schedule_lock:
+            for item in schedule_items:
+                if item.get("status") != "scheduled":
+                    continue
+                start_time = item.get("start_time")
+                if not start_time:
+                    continue
+                try:
+                    start_dt = datetime.fromisoformat(start_time)
+                except ValueError:
+                    continue
+                if start_dt <= now:
+                    ok, result = tuner.start_recording(
+                        item.get("channel"),
+                        int(item.get("duration_seconds", 0)),
+                        item.get("title", "")
+                    )
+                    if ok:
+                        item["status"] = "recording"
+                        item["recording_path"] = result
+                        item["started_at"] = now.isoformat()
+                    else:
+                        item["status"] = "error"
+                        item["error"] = result
+            save_schedule()
+        time.sleep(5)
+
+load_schedule()
+threading.Thread(target=schedule_worker, daemon=True).start()
 
 @app.route("/")
 def index():
@@ -528,6 +643,44 @@ def api_location():
             })
     except (urllib.error.URLError, json.JSONDecodeError):
         return jsonify({"error": "Unable to determine location"}), 502
+
+@app.route("/api/guide")
+def api_guide():
+    return jsonify(load_guide())
+
+@app.route("/api/dvr/schedule", methods=["GET", "POST"])
+def api_dvr_schedule():
+    if request.method == "GET":
+        return jsonify({"schedule": schedule_items})
+    payload = request.get_json(silent=True) or {}
+    channel = payload.get("channel")
+    start_time = payload.get("start_time")
+    duration_seconds = int(payload.get("duration_seconds", 0))
+    title = payload.get("title", channel)
+    if not channel or not start_time or duration_seconds <= 0:
+        return jsonify({"success": False, "error": "channel, start_time, duration_seconds required"}), 400
+    item = {
+        "id": str(uuid.uuid4()),
+        "channel": channel,
+        "title": title,
+        "start_time": start_time,
+        "duration_seconds": duration_seconds,
+        "status": "scheduled"
+    }
+    with schedule_lock:
+        schedule_items.append(item)
+        save_schedule()
+    return jsonify({"success": True, "item": item})
+
+@app.route("/api/dvr/schedule/<schedule_id>", methods=["DELETE"])
+def api_dvr_schedule_delete(schedule_id):
+    with schedule_lock:
+        before = len(schedule_items)
+        schedule_items[:] = [item for item in schedule_items if item.get("id") != schedule_id]
+        if len(schedule_items) == before:
+            return jsonify({"success": False, "error": "not found"}), 404
+        save_schedule()
+    return jsonify({"success": True})
 
 @app.route("/favicon.ico")
 def favicon():

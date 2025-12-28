@@ -115,6 +115,7 @@ function updateChannelList(channels) {
     const channelList = document.getElementById('channelList');
     const channelCount = document.getElementById('channelCount');
     
+    window.currentChannels = channels;
     channelList.innerHTML = '';
     channelCount.textContent = Object.keys(channels).length;
     
@@ -142,6 +143,8 @@ function updateChannelList(channels) {
         
         channelList.appendChild(button);
     });
+
+    updateDvrChannelOptions();
 }
 
 function updateUI() {
@@ -512,7 +515,135 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadScanRegions();
     initBroadcastMap();
+    loadGuide();
+    loadSchedule();
 });
+
+async function loadGuide() {
+    try {
+        const response = await fetch('/api/guide');
+        if (!response.ok) {
+            return;
+        }
+        const data = await response.json();
+        const container = document.getElementById('guideList');
+        if (!container) {
+            return;
+        }
+        if (data.error) {
+            container.innerHTML = `<small class="text-muted">${data.error}</small>`;
+            return;
+        }
+        const programs = (data.programs || []).slice(0, 20);
+        if (programs.length === 0) {
+            container.innerHTML = '<small class="text-muted">No guide data available.</small>';
+            return;
+        }
+        container.innerHTML = programs.map((prog) => `
+            <div class="guide-item">
+                <strong>${prog.title}</strong><br>
+                <small class="text-muted">${prog.channel_id || 'Unknown channel'} • ${prog.start || ''}</small>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Failed to load guide:', error);
+    }
+}
+
+async function loadSchedule() {
+    try {
+        const response = await fetch('/api/dvr/schedule');
+        if (!response.ok) {
+            return;
+        }
+        const data = await response.json();
+        const container = document.getElementById('scheduleList');
+        if (!container) {
+            return;
+        }
+        const items = data.schedule || [];
+        if (items.length === 0) {
+            container.innerHTML = '<small class="text-muted">No scheduled recordings.</small>';
+            return;
+        }
+        container.innerHTML = items.map((item) => `
+            <div class="guide-item">
+                <strong>${item.title || item.channel}</strong><br>
+                <small class="text-muted">${item.channel} • ${item.start_time} • ${item.status}</small>
+                <button class="btn btn-sm btn-outline-danger mt-1" onclick="deleteSchedule('${item.id}')">Delete</button>
+            </div>
+        `).join('');
+    } catch (error) {
+        console.error('Failed to load schedule:', error);
+    }
+}
+
+async function addSchedule() {
+    const channel = document.getElementById('dvrChannel').value;
+    const startTime = document.getElementById('dvrStartTime').value;
+    const durationMinutes = parseInt(document.getElementById('dvrDuration').value, 10);
+    const title = document.getElementById('dvrTitle').value;
+
+    if (!channel || !startTime || !durationMinutes) {
+        alert('Channel, start time, and duration are required.');
+        return;
+    }
+    const payload = {
+        channel,
+        start_time: new Date(startTime).toISOString(),
+        duration_seconds: durationMinutes * 60,
+        title
+    };
+    try {
+        const response = await fetch('/api/dvr/schedule', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!data.success) {
+            alert(data.error || 'Failed to add schedule');
+            return;
+        }
+        loadSchedule();
+    } catch (error) {
+        console.error('Failed to add schedule:', error);
+    }
+}
+
+async function deleteSchedule(id) {
+    try {
+        const response = await fetch(`/api/dvr/schedule/${id}`, {method: 'DELETE'});
+        if (!response.ok) {
+            return;
+        }
+        loadSchedule();
+    } catch (error) {
+        console.error('Failed to delete schedule:', error);
+    }
+}
+
+function updateDvrChannelOptions() {
+    const select = document.getElementById('dvrChannel');
+    if (!select) {
+        return;
+    }
+    const current = select.value;
+    select.innerHTML = '';
+    const channels = window.currentChannels || {};
+    const options = Object.entries(channels).sort((a, b) => {
+        return parseFloat(a[0]) - parseFloat(b[0]);
+    });
+    options.forEach(([channelId, info]) => {
+        const option = document.createElement('option');
+        option.value = channelId;
+        option.textContent = `${channelId} - ${info.name || channelId}`;
+        select.appendChild(option);
+    });
+    if (current) {
+        select.value = current;
+    }
+}
 
 async function loadScanRegions() {
     try {
