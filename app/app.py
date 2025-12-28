@@ -791,8 +791,8 @@ class TVTuner:
         ffmpeg_monitor = threading.Thread(target=monitor_ffmpeg, daemon=True)
         ffmpeg_monitor.start()
 
-        # Wait for ffmpeg to start processing
-        time.sleep(3)
+        # Wait for ffmpeg to start processing (reduced since no analyzeduration delays)
+        time.sleep(1)
 
         if self.ffmpeg_proc.poll() is not None:
             logger.error(f"[STREAM] ffmpeg died with code {self.ffmpeg_proc.returncode}")
@@ -801,12 +801,12 @@ class TVTuner:
             return False
 
         logger.info("[STREAM] ffmpeg started successfully")
-        logger.info(f"[STREAM] Building DVR buffer (20 seconds)...")
+        logger.info(f"[STREAM] Building DVR buffer (optimized startup)...")
         logger.info(f"[STREAM] This allows clean playback and rewind capability")
 
-        # Wait for initial playlist creation
+        # Wait for initial playlist creation (reduced from 10s to 5s)
         playlist_ready = False
-        for i in range(10):
+        for i in range(5):
             if os.path.exists(hls_playlist):
                 try:
                     with open(hls_playlist, 'r') as f:
@@ -819,20 +819,20 @@ class TVTuner:
             time.sleep(1)
 
         if not playlist_ready:
-            logger.error("[STREAM] HLS playlist not created after 10 seconds")
+            logger.error("[STREAM] HLS playlist not created after 5 seconds")
             return False
 
-        # Now wait 10 seconds to build DVR buffer (reduced since hardware encoding is fast)
+        # Now wait 5 seconds to build DVR buffer (optimized with fast startup)
         # This ensures:
         # 1. Stream has fully stabilized (no more corrupt packets)
         # 2. We have enough segments for smooth playback
         # 3. User can rewind/pause like a traditional DVR
         logger.info("[STREAM] Buffering segments for DVR functionality...")
-        buffer_time = 10
+        buffer_time = 5
         for i in range(buffer_time):
             time.sleep(1)
-            # Check segment count every 5 seconds
-            if (i + 1) % 5 == 0:
+            # Log progress at end of buffer
+            if (i + 1) == buffer_time:
                 try:
                     with open(hls_playlist, 'r') as f:
                         content = f.read()

@@ -337,7 +337,7 @@ async function startStream() {
         const bufferingMsg = document.createElement('div');
         bufferingMsg.id = 'bufferingMessage';
         bufferingMsg.style.cssText = 'position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px; border-radius: 10px; font-size: 18px; z-index: 1000;';
-        bufferingMsg.innerHTML = '<i class="bi bi-hourglass-split"></i> Building DVR buffer...<br><small>Please wait 20 seconds</small>';
+        bufferingMsg.innerHTML = '<i class="bi bi-hourglass-split"></i> Building DVR buffer...<br><small>Please wait ~10 seconds</small>';
         video.parentElement.style.position = 'relative';
         video.parentElement.appendChild(bufferingMsg);
 
