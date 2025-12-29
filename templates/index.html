@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>RPi4 OC Panel</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 18px; }
+    .row { display: flex; gap: 18px; align-items: flex-start; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; min-width: 320px; }
+    .k { color:#666; font-size: 12px; }
+    .v { font-size: 18px; margin-bottom: 10px; }
+    button { padding: 10px 12px; border-radius: 10px; border: 1px solid #ccc; background: #f7f7f7; cursor: pointer; }
+    button.primary { background:#111; color:#fff; border-color:#111; }
+    select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #ccc; }
+    .msg { padding: 10px; border-radius: 10px; margin-bottom: 10px; }
+    .ok { background:#e8fff0; border:1px solid #bde7c9; }
+    .err { background:#ffecec; border:1px solid #f3b7b7; }
+    .muted { color:#777; font-size: 12px; }
+    .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:#eee; font-size:12px; }
+    .warn { background:#fff3cd; }
+  </style>
+</head>
+<body>
+  <h2>RPi4 OC Panel</h2>
+  <div class="muted">Refreshes on page reload. Apply changes writes /boot/config.txt and can reboot.</div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for cat,msg in messages %}
+        <div class="msg {{ 'ok' if cat=='ok' else 'err' }}">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="row">
+    <div class="card">
+      <div class="k">Time</div><div class="v">{{ status.time }}</div>
+      <div class="k">Temp</div><div class="v">{{ status.temp }}</div>
+      <div class="k">ARM Clock</div><div class="v">{{ '%.0f'|format(status.arm_mhz) }} MHz</div>
+      <div class="k">Core Clock</div><div class="v">{{ '%.0f'|format(status.core_mhz) }} MHz</div>
+      <div class="k">Voltage</div><div class="v">{{ status.volts }}</div>
+      <div class="k">Throttled</div>
+      <div class="v">
+        {{ status.throttled }}
+        {% if status.throttled != 'throttled=0x0' %}
+          <span class="pill warn">not 0x0 (throttling/undervoltage happened)</span>
+        {% else %}
+          <span class="pill">ok</span>
+        {% endif %}
+      </div>
+      <div class="k">Detected profile</div>
+      <div class="v"><span class="pill">{{ status.profile }}</span></div>
+
+      <form method="post" action="/reboot">
+        <button type="submit">Reboot</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">Overclock Profile</h3>
+
+      <form method="post" action="/apply">
+        <label class="k">Choose profile</label>
+        <select name="profile" required>
+          {% for key,val in profiles.items() %}
+            <option value="{{ key }}" {% if status.profile == key %}selected{% endif %}>
+              {{ key }} — {{ val.label }}
+            </option>
+          {% endfor %}
+          {% if status.profile == 'custom' %}
+            <option value="custom" selected disabled>custom — (edit /boot/config.txt manually)</option>
+          {% endif %}
+        </select>
+
+        <div style="margin:10px 0" class="muted">
+          <label><input type="checkbox" name="reboot" value="1" checked> Reboot after apply</label>
+        </div>
+
+        <button class="primary" type="submit">Apply Profile</button>
+      </form>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:14px 0"/>
+      <div class="muted">
+        <div><b>Note:</b> “max” uses over_voltage=6 + force_turbo=1 (warranty flag). If it boot-loops, remove the OCPANEL block from /boot/config.txt.</div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
