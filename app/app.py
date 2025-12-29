@@ -758,6 +758,8 @@ class TVTuner:
             # Transcode to H.264 (browsers need this, not MPEG-2)
             "-c:v", "h264_v4l2m2m",  # RPI4 hardware H.264 encoder
             "-b:v", "4M",  # 4Mbps video bitrate
+            "-force_key_frames", "expr:gte(t,n_forced*2)",  # Align keyframes with 2s HLS segments
+            "-sc_threshold", "0",  # Avoid keyframes drifting from segment boundaries
             "-c:a", "aac",  # Transcode AC-3 to AAC for browser support
             "-b:a", "128k",  # 128kbps audio bitrate
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
