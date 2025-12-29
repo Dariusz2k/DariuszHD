@@ -694,7 +694,10 @@ class TVTuner:
 
         # Clean up old HLS files
         import glob
-        for old_file in glob.glob(os.path.join(hls_dir, "stream*.ts")) + glob.glob(os.path.join(hls_dir, "*.m3u8")):
+        for old_file in (
+            glob.glob(os.path.join(hls_dir, "stream*.ts"))
+            + glob.glob(os.path.join(hls_dir, "*.m3u8"))
+        ):
             try:
                 os.remove(old_file)
             except:
@@ -758,13 +761,14 @@ class TVTuner:
             # Transcode to H.264 (browsers need this, not MPEG-2)
             "-c:v", "h264_v4l2m2m",  # RPI4 hardware H.264 encoder
             "-b:v", "4M",  # 4Mbps video bitrate
+            "-force_key_frames", "expr:gte(t,n_forced*2)",  # Align keyframes with 2s HLS segments
             "-c:a", "aac",  # Transcode AC-3 to AAC for browser support
             "-b:a", "128k",  # 128kbps audio bitrate
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
             "-f", "hls",
             "-hls_time", "2",
             "-hls_list_size", "10",  # Keep more segments to avoid gaps
-            "-hls_flags", "delete_segments+append_list+omit_endlist",  # Delete old segments
+            "-hls_flags", "delete_segments+append_list+omit_endlist+temp_file+independent_segments",  # Delete old segments, publish only complete/keyframe segments
             "-hls_segment_filename", os.path.join(hls_dir, "stream%d.ts"),
             hls_playlist
         ]
@@ -1025,4 +1029,3 @@ if __name__ == "__main__":
     logger.info("Starting SocketIO server on 0.0.0.0:5000")
     logger.info("Access the app at: http://localhost:5000")
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
-
