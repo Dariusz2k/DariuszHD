@@ -8,7 +8,12 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 app = Flask(__name__)
 app.secret_key = os.environ.get("OCPANEL_SECRET", "change-me")
 
-CONFIG_PATH = "/boot/config.txt"
+# Try new location first (Bookworm+), fallback to old location
+if os.path.exists("/boot/firmware/config.txt"):
+    CONFIG_PATH = "/boot/firmware/config.txt"
+else:
+    CONFIG_PATH = "/boot/config.txt"
+
 MARK_BEGIN = "# === OCPANEL BEGIN ==="
 MARK_END   = "# === OCPANEL END ==="
 
