@@ -58,12 +58,40 @@ def parse_measure_clock(out: str) -> int:
     m = re.search(r"frequency\(\d+\)=(\d+)", out)
     return int(m.group(1)) if m else 0
 
+def get_argon_fan_speed() -> str:
+    """
+    Read Argon ONE fan speed via I2C.
+    The Argon ONE uses I2C address 0x1a.
+    Returns fan speed as percentage string or 'N/A' if unavailable.
+    """
+    try:
+        # Try to read fan speed from I2C device
+        result = run("i2cget -y 1 0x1a 0x00")
+        if result:
+            # Convert hex to decimal percentage
+            speed_hex = result.strip()
+            speed = int(speed_hex, 16) if speed_hex.startswith('0x') else int(speed_hex)
+            return f"{speed}%"
+    except:
+        pass
+
+    # Alternative: try reading from Argon daemon status if it exists
+    try:
+        if os.path.exists("/tmp/argon_fan_speed"):
+            with open("/tmp/argon_fan_speed", "r") as f:
+                return f.read().strip() + "%"
+    except:
+        pass
+
+    return "N/A"
+
 def get_status():
     temp = vcgencmd("measure_temp")              # temp=38.4'C
     volts = vcgencmd("measure_volts")            # volt=0.8625V
     arm_hz = parse_measure_clock(vcgencmd("measure_clock arm"))
     core_hz = parse_measure_clock(vcgencmd("measure_clock core"))
     throttled = vcgencmd("get_throttled")        # throttled=0x0
+    fan_speed = get_argon_fan_speed()
 
     return {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -73,6 +101,7 @@ def get_status():
         "core_mhz": core_hz / 1_000_000 if core_hz else 0,
         "throttled": throttled,
         "profile": detect_profile(),
+        "fan_speed": fan_speed,
     }
 
 def read_config() -> str:
