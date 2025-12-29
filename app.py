@@ -3,7 +3,7 @@ import re
 import shlex
 import subprocess
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("OCPANEL_SECRET", "change-me")
@@ -58,35 +58,42 @@ def parse_measure_clock(out: str) -> int:
     m = re.search(r"frequency\(\d+\)=(\d+)", out)
     return int(m.group(1)) if m else 0
 
+def parse_temperature(temp_str: str) -> float:
+    """Parse temperature from vcgencmd output like 'temp=39.9'C'"""
+    m = re.search(r"temp=([0-9.]+)", temp_str)
+    return float(m.group(1)) if m else 0.0
+
 def get_argon_fan_speed() -> str:
     """
-    Read Argon ONE fan speed via I2C.
-    The Argon ONE uses I2C address 0x1a.
-    Returns fan speed as percentage string or 'N/A' if unavailable.
+    Read Argon ONE fan speed using the official Argon status script.
+    Falls back to N/A if the script is not available.
     """
     try:
-        # Try to read fan speed from I2C device
-        result = run("i2cget -y 1 0x1a 0x00")
-        if result:
-            # Convert hex to decimal percentage
-            speed_hex = result.strip()
-            speed = int(speed_hex, 16) if speed_hex.startswith('0x') else int(speed_hex)
-            return f"{speed}%"
-    except:
-        pass
-
-    # Alternative: try reading from Argon daemon status if it exists
-    try:
-        if os.path.exists("/tmp/argon_fan_speed"):
-            with open("/tmp/argon_fan_speed", "r") as f:
-                return f.read().strip() + "%"
+        # Use the official Argon status script
+        argonstatusscript = "/etc/argon/argonstatus.py"
+        if os.path.exists(argonstatusscript):
+            result = run(f'sudo /usr/bin/python3 {argonstatusscript} "fan speed"')
+            if result:
+                # The script returns something like "Fan Speed: 50%"
+                # Extract just the percentage
+                lines = result.strip().split('\n')
+                for line in lines:
+                    if 'Fan Speed' in line or '%' in line:
+                        # Extract percentage value
+                        import re
+                        match = re.search(r'(\d+)\s*%', line)
+                        if match:
+                            return f"{match.group(1)}%"
+                        # If no percentage found, return the whole line
+                        return line.split(':')[-1].strip()
     except:
         pass
 
     return "N/A"
 
 def get_status():
-    temp = vcgencmd("measure_temp")              # temp=38.4'C
+    temp_str = vcgencmd("measure_temp")          # temp=38.4'C
+    temp_c = parse_temperature(temp_str)
     volts = vcgencmd("measure_volts")            # volt=0.8625V
     arm_hz = parse_measure_clock(vcgencmd("measure_clock arm"))
     core_hz = parse_measure_clock(vcgencmd("measure_clock core"))
@@ -95,7 +102,8 @@ def get_status():
 
     return {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "temp": temp,
+        "temp": temp_str,
+        "temp_c": temp_c,
         "volts": volts,
         "arm_mhz": arm_hz / 1_000_000 if arm_hz else 0,
         "core_mhz": core_hz / 1_000_000 if core_hz else 0,
@@ -160,6 +168,11 @@ def detect_profile() -> str:
 def index():
     st = get_status()
     return render_template("index.html", status=st, profiles=PROFILES)
+
+@app.get("/api/status")
+def api_status():
+    """JSON endpoint for AJAX updates"""
+    return jsonify(get_status())
 
 @app.post("/apply")
 def apply():

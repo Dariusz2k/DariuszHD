@@ -399,6 +399,79 @@
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
     }
+
+    .temp-display {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .temp-gauge {
+      position: relative;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: conic-gradient(
+        from 0deg,
+        #3b82f6 0deg,
+        #22c55e 90deg,
+        #fbbf24 180deg,
+        #f97316 270deg,
+        #ef4444 360deg
+      );
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    }
+
+    .temp-gauge::before {
+      content: '';
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
+    }
+
+    .temp-value {
+      position: relative;
+      z-index: 1;
+      font-size: 1.5em;
+      font-weight: 700;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    }
+
+    .temp-status {
+      font-size: 0.9em;
+      opacity: 0.9;
+    }
+
+    .temp-badge {
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.8em;
+      font-weight: 600;
+      display: inline-block;
+      margin-top: 4px;
+    }
+
+    .temp-cool { background: rgba(59, 130, 246, 0.3); border: 1px solid rgba(59, 130, 246, 0.5); color: #60a5fa; }
+    .temp-normal { background: rgba(34, 197, 94, 0.3); border: 1px solid rgba(34, 197, 94, 0.5); color: #4ade80; }
+    .temp-warm { background: rgba(251, 191, 36, 0.3); border: 1px solid rgba(251, 191, 36, 0.5); color: #fbbf24; }
+    .temp-hot { background: rgba(249, 115, 22, 0.3); border: 1px solid rgba(249, 115, 22, 0.5); color: #fb923c; }
+    .temp-critical { background: rgba(239, 68, 68, 0.3); border: 1px solid rgba(239, 68, 68, 0.5); color: #f87171; }
+
+    @keyframes fadeIn {
+      from { opacity: 0.5; }
+      to { opacity: 1; }
+    }
+
+    .updating {
+      animation: fadeIn 0.3s ease-in-out;
+    }
   </style>
 </head>
 <body>
@@ -423,32 +496,41 @@
 
         <div class="stat">
           <div class="stat-label">Temperature</div>
-          <div class="stat-value large">{{ status.temp }}</div>
+          <div class="stat-value">
+            <div class="temp-display">
+              <div class="temp-gauge">
+                <div class="temp-value" id="tempValue">{{ '%.1f'|format(status.temp_c) }}°C</div>
+              </div>
+              <div class="temp-status">
+                <div id="tempBadge"></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="stat">
           <div class="stat-label">Argon Fan Speed</div>
-          <div class="stat-value"><span class="fan-icon">🌀</span> {{ status.fan_speed }}</div>
+          <div class="stat-value"><span class="fan-icon">🌀</span> <span id="fanSpeed">{{ status.fan_speed }}</span></div>
         </div>
 
         <div class="stat">
           <div class="stat-label">ARM Clock</div>
-          <div class="stat-value">{{ '%.0f'|format(status.arm_mhz) }} MHz</div>
+          <div class="stat-value"><span id="armClock">{{ '%.0f'|format(status.arm_mhz) }}</span> MHz</div>
         </div>
 
         <div class="stat">
           <div class="stat-label">Core Clock</div>
-          <div class="stat-value">{{ '%.0f'|format(status.core_mhz) }} MHz</div>
+          <div class="stat-value"><span id="coreClock">{{ '%.0f'|format(status.core_mhz) }}</span> MHz</div>
         </div>
 
         <div class="stat">
           <div class="stat-label">Voltage</div>
-          <div class="stat-value">{{ status.volts }}</div>
+          <div class="stat-value" id="voltage">{{ status.volts }}</div>
         </div>
 
         <div class="stat">
           <div class="stat-label">Throttle Status</div>
-          <div class="stat-value">
+          <div class="stat-value" id="throttleStatus">
             {% if status.throttled != 'throttled=0x0' %}
               <span class="pill warn">⚠ {{ status.throttled }}</span>
             {% else %}
@@ -460,13 +542,13 @@
         <div class="stat">
           <div class="stat-label">Active Profile</div>
           <div class="stat-value">
-            <span class="pill profile">{{ status.profile }}</span>
+            <span class="pill profile" id="activeProfile">{{ status.profile }}</span>
           </div>
         </div>
 
         <div class="stat">
           <div class="stat-label">Last Update</div>
-          <div class="stat-value" style="font-size:1.1em;">{{ status.time }}</div>
+          <div class="stat-value" style="font-size:1.1em;" id="lastUpdate">{{ status.time }}</div>
         </div>
       </div>
 
@@ -528,12 +610,69 @@
   </div>
 
   <script>
-    // Auto-refresh every 5 seconds
-    let refreshInterval = setInterval(() => {
-      window.location.reload();
-    }, 5000);
+    // Get temperature status and color
+    function getTempStatus(temp) {
+      if (temp < 40) {
+        return { status: 'Cool', class: 'temp-cool', icon: '❄️' };
+      } else if (temp < 55) {
+        return { status: 'Normal', class: 'temp-normal', icon: '✓' };
+      } else if (temp < 65) {
+        return { status: 'Warm', class: 'temp-warm', icon: '⚠' };
+      } else if (temp < 75) {
+        return { status: 'Hot', class: 'temp-hot', icon: '🔥' };
+      } else {
+        return { status: 'Critical', class: 'temp-critical', icon: '⚠️' };
+      }
+    }
 
-    // Visual feedback for auto-refresh
+    // Update temperature display
+    function updateTempDisplay(temp) {
+      const tempInfo = getTempStatus(temp);
+      document.getElementById('tempValue').textContent = temp.toFixed(1) + '°C';
+      document.getElementById('tempBadge').innerHTML =
+        `<span class="temp-badge ${tempInfo.class}">${tempInfo.icon} ${tempInfo.status}</span>`;
+    }
+
+    // Update status from API
+    async function updateStatus() {
+      try {
+        const response = await fetch('/api/status');
+        if (!response.ok) return;
+
+        const data = await response.json();
+
+        // Add fade animation
+        document.body.classList.add('updating');
+        setTimeout(() => document.body.classList.remove('updating'), 300);
+
+        // Update all fields
+        updateTempDisplay(data.temp_c);
+        document.getElementById('fanSpeed').textContent = data.fan_speed;
+        document.getElementById('armClock').textContent = Math.round(data.arm_mhz);
+        document.getElementById('coreClock').textContent = Math.round(data.core_mhz);
+        document.getElementById('voltage').textContent = data.volts;
+        document.getElementById('activeProfile').textContent = data.profile;
+        document.getElementById('lastUpdate').textContent = data.time;
+
+        // Update throttle status
+        const throttleEl = document.getElementById('throttleStatus');
+        if (data.throttled !== 'throttled=0x0') {
+          throttleEl.innerHTML = `<span class="pill warn">⚠ ${data.throttled}</span>`;
+        } else {
+          throttleEl.innerHTML = `<span class="pill ok">✓ All Good</span>`;
+        }
+      } catch (error) {
+        console.error('Failed to update status:', error);
+      }
+    }
+
+    // Initial temperature display
+    updateTempDisplay({{ status.temp_c }});
+
+    // Auto-refresh every 5 seconds using AJAX
+    let refreshInterval = setInterval(updateStatus, 5000);
+
+    // Visual feedback for auto-refresh countdown
     let countdown = 5;
     setInterval(() => {
       countdown--;
