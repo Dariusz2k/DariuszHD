@@ -324,6 +324,104 @@ async function surfPrev() {
 
 // Global HLS instance
 let hls = null;
+let playbackOverlayInitialized = false;
+
+function setOverlayState({visible, title, status, buttonText, buttonDisabled}) {
+    const overlay = document.getElementById('playbackOverlay');
+    if (!overlay) return;
+    const titleEl = overlay.querySelector('.playback-title');
+    const statusEl = document.getElementById('overlayStatus');
+    const buttonEl = document.getElementById('overlayPlayBtn');
+
+    if (title && titleEl) titleEl.textContent = title;
+    if (status && statusEl) statusEl.textContent = status;
+    if (buttonEl) {
+        if (buttonText) buttonEl.textContent = buttonText;
+        buttonEl.disabled = Boolean(buttonDisabled);
+    }
+
+    if (visible) {
+        overlay.classList.remove('hidden');
+    } else {
+        overlay.classList.add('hidden');
+    }
+}
+
+function initPlaybackOverlay() {
+    if (playbackOverlayInitialized) return;
+    playbackOverlayInitialized = true;
+    const overlayButton = document.getElementById('overlayPlayBtn');
+    const video = document.getElementById('videoPlayer');
+
+    if (overlayButton) {
+        overlayButton.addEventListener('click', async () => {
+            if (!currentChannel) {
+                alert('Please select a channel first');
+                return;
+            }
+            if (isStreaming && video && video.paused) {
+                video.play().catch(err => {
+                    console.error('Autoplay failed:', err);
+                });
+                return;
+            }
+            await startStream();
+        });
+    }
+
+    if (video) {
+        video.addEventListener('playing', () => {
+            setOverlayState({
+                visible: false,
+                title: 'Playing Live',
+                status: 'Playback is live.',
+                buttonText: '▶ Resume',
+                buttonDisabled: false
+            });
+        });
+
+        video.addEventListener('pause', () => {
+            if (!isStreaming) {
+                setOverlayState({
+                    visible: true,
+                    title: 'Playback Stopped',
+                    status: 'Start playback to watch live TV.',
+                    buttonText: '▶ Start Playback',
+                    buttonDisabled: false
+                });
+                return;
+            }
+
+            setOverlayState({
+                visible: true,
+                title: 'Paused',
+                status: 'Resume playback when you are ready.',
+                buttonText: '▶ Resume',
+                buttonDisabled: false
+            });
+        });
+
+        video.addEventListener('waiting', () => {
+            setOverlayState({
+                visible: true,
+                title: 'Buffering',
+                status: 'Reconnecting to the live stream...',
+                buttonText: 'Buffering...',
+                buttonDisabled: true
+            });
+        });
+
+        video.addEventListener('error', () => {
+            setOverlayState({
+                visible: true,
+                title: 'Playback Error',
+                status: 'We hit a playback error. Try restarting the stream.',
+                buttonText: '⟳ Restart',
+                buttonDisabled: false
+            });
+        });
+    }
+}
 
 async function startStream() {
     if (!currentChannel) {
@@ -332,6 +430,15 @@ async function startStream() {
     }
 
     try {
+        initPlaybackOverlay();
+        setOverlayState({
+            visible: true,
+            title: 'Starting Stream',
+            status: 'Buffering live TV. This can take a few seconds.',
+            buttonText: 'Starting...',
+            buttonDisabled: true
+        });
+
         // Show buffering message
         const video = document.getElementById('videoPlayer');
         const bufferingMsg = document.createElement('div');
@@ -381,8 +488,13 @@ async function startStream() {
                     // Let hls.js start from live edge naturally (don't set currentTime)
                     video.play().catch(err => {
                         console.error('Autoplay failed:', err);
-                        // Show click-to-play message if autoplay blocked
-                        alert('Click the video to start playback');
+                        setOverlayState({
+                            visible: true,
+                            title: 'Tap to Play',
+                            status: 'Autoplay was blocked. Click to start playback.',
+                            buttonText: '▶ Start Playback',
+                            buttonDisabled: false
+                        });
                     });
                 });
 
@@ -397,10 +509,24 @@ async function startStream() {
                             case Hls.ErrorTypes.MEDIA_ERROR:
                                 console.error('Fatal media error, trying to recover');
                                 hls.recoverMediaError();
+                                setOverlayState({
+                                    visible: true,
+                                    title: 'Recovering Stream',
+                                    status: 'Attempting to recover playback...',
+                                    buttonText: 'Recovering...',
+                                    buttonDisabled: true
+                                });
                                 break;
                             default:
                                 console.error('Fatal error, cannot recover');
                                 hls.destroy();
+                                setOverlayState({
+                                    visible: true,
+                                    title: 'Playback Error',
+                                    status: 'Unable to recover. Restart the stream.',
+                                    buttonText: '⟳ Restart',
+                                    buttonDisabled: false
+                                });
                                 break;
                         }
                     }
@@ -414,9 +540,23 @@ async function startStream() {
                 });
             } else {
                 alert('HLS is not supported in your browser');
+                setOverlayState({
+                    visible: true,
+                    title: 'Playback Unsupported',
+                    status: 'Your browser cannot play HLS streams.',
+                    buttonText: 'Playback Unavailable',
+                    buttonDisabled: true
+                });
             }
         } else {
             alert('Failed to start stream');
+            setOverlayState({
+                visible: true,
+                title: 'Stream Failed',
+                status: 'Unable to start the stream. Try again.',
+                buttonText: '⟳ Retry',
+                buttonDisabled: false
+            });
         }
     } catch (error) {
         console.error('Stream start error:', error);
@@ -424,6 +564,13 @@ async function startStream() {
         const bufferingMsg = document.getElementById('bufferingMessage');
         if (bufferingMsg) bufferingMsg.remove();
         alert('Failed to start stream: ' + error.message);
+        setOverlayState({
+            visible: true,
+            title: 'Stream Error',
+            status: 'There was an error starting playback.',
+            buttonText: '⟳ Retry',
+            buttonDisabled: false
+        });
     }
 }
 
@@ -445,6 +592,13 @@ async function stopStream() {
             const video = document.getElementById('videoPlayer');
             video.pause();
             video.src = '';
+            setOverlayState({
+                visible: true,
+                title: 'Playback Stopped',
+                status: 'Select a channel to start watching again.',
+                buttonText: '▶ Start Playback',
+                buttonDisabled: false
+            });
         }
     } catch (error) {
         console.error('Stream stop error:', error);
@@ -472,6 +626,14 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('DOMContentLoaded', function() {
     initSocket();
     updateUI();
+    initPlaybackOverlay();
+    setOverlayState({
+        visible: true,
+        title: 'Ready to Play',
+        status: 'Select a channel and start playback.',
+        buttonText: '▶ Start Playback',
+        buttonDisabled: false
+    });
     
     // Initialize signal threshold slider
     document.getElementById('signalThreshold').addEventListener('input', updateThresholdValue);

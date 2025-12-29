@@ -79,10 +79,21 @@
                     </div>
                     <div class="card-body p-0">
                         <div id="videoContainer" class="ratio ratio-16x9 bg-dark">
-                            <video id="videoPlayer" class="w-100" controls>
+                            <video id="videoPlayer" class="w-100" controls playsinline>
                                 <source src="/stream" type="video/mp2t">
                                 Your browser does not support the video tag.
                             </video>
+                            <div id="playbackOverlay" class="playback-overlay" aria-live="polite">
+                                <div class="playback-overlay-content">
+                                    <div class="playback-title">Ready to Play</div>
+                                    <button id="overlayPlayBtn" class="btn btn-primary" type="button">
+                                        ▶ Start Playback
+                                    </button>
+                                    <div id="overlayStatus" class="playback-status">
+                                        Select a channel and start playback.
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
