@@ -695,9 +695,8 @@ class TVTuner:
         # Clean up old HLS files
         import glob
         for old_file in (
-            glob.glob(os.path.join(hls_dir, "stream*.m4s"))
+            glob.glob(os.path.join(hls_dir, "stream*.ts"))
             + glob.glob(os.path.join(hls_dir, "*.m3u8"))
-            + glob.glob(os.path.join(hls_dir, "*.mp4"))
         ):
             try:
                 os.remove(old_file)
@@ -763,7 +762,6 @@ class TVTuner:
             "-c:v", "h264_v4l2m2m",  # RPI4 hardware H.264 encoder
             "-b:v", "4M",  # 4Mbps video bitrate
             "-force_key_frames", "expr:gte(t,n_forced*2)",  # Align keyframes with 2s HLS segments
-            "-sc_threshold", "0",  # Avoid keyframes drifting from segment boundaries
             "-c:a", "aac",  # Transcode AC-3 to AAC for browser support
             "-b:a", "128k",  # 128kbps audio bitrate
             "-avoid_negative_ts", "make_zero",  # Avoid negative timestamps
@@ -771,9 +769,7 @@ class TVTuner:
             "-hls_time", "2",
             "-hls_list_size", "10",  # Keep more segments to avoid gaps
             "-hls_flags", "delete_segments+append_list+omit_endlist+temp_file+independent_segments",  # Delete old segments, publish only complete/keyframe segments
-            "-hls_segment_type", "fmp4",
-            "-hls_fmp4_init_filename", "init.mp4",
-            "-hls_segment_filename", os.path.join(hls_dir, "stream%d.m4s"),
+            "-hls_segment_filename", os.path.join(hls_dir, "stream%d.ts"),
             hls_playlist
         ]
 
@@ -843,7 +839,7 @@ class TVTuner:
                 try:
                     with open(hls_playlist, 'r') as f:
                         content = f.read()
-                        segment_count = content.count('.m4s')
+                        segment_count = content.count('.ts')
                         logger.info(f"[STREAM] Buffer progress: {i+1}/{buffer_time}s - {segment_count} segments")
                 except:
                     pass
@@ -852,7 +848,7 @@ class TVTuner:
         try:
             with open(hls_playlist, 'r') as f:
                 content = f.read()
-                segment_count = content.count('.m4s')
+                segment_count = content.count('.ts')
                 if segment_count < 5:
                     logger.warning(f"[STREAM] Only {segment_count} segments after buffering")
                 else:
@@ -862,7 +858,7 @@ class TVTuner:
 
         # Get first segment info for logging
         try:
-            segments = [f for f in os.listdir(hls_dir) if f.startswith('stream') and f.endswith('.m4s')]
+            segments = [f for f in os.listdir(hls_dir) if f.startswith('stream') and f.endswith('.ts')]
             if segments:
                 first_segment = sorted(segments)[0]
                 segment_size = os.path.getsize(os.path.join(hls_dir, first_segment))
