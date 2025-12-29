@@ -463,6 +463,12 @@ async function startStream() {
             // Initialize HLS player with DVR mode
             const hlsUrl = `/hls/stream.m3u8?t=${Date.now()}`;
 
+            if (video) {
+                video.pause();
+                video.removeAttribute('src');
+                video.load();
+            }
+
             if (Hls.isSupported()) {
                 // Clean up existing HLS instance
                 if (hls) {
@@ -592,6 +598,8 @@ async function stopStream() {
             const video = document.getElementById('videoPlayer');
             video.pause();
             video.src = '';
+            video.removeAttribute('src');
+            video.load();
             setOverlayState({
                 visible: true,
                 title: 'Playback Stopped',
