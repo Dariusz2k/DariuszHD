@@ -772,7 +772,7 @@ class TVTuner:
             "-hls_list_size", "10",  # Keep more segments to avoid gaps
             "-hls_flags", "delete_segments+append_list+omit_endlist+temp_file+independent_segments",  # Delete old segments, publish only complete/keyframe segments
             "-hls_segment_type", "fmp4",
-            "-hls_fmp4_init_filename", os.path.join(hls_dir, "init.mp4"),
+            "-hls_fmp4_init_filename", "init.mp4",
             "-hls_segment_filename", os.path.join(hls_dir, "stream%d.m4s"),
             hls_playlist
         ]
