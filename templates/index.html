@@ -136,7 +136,6 @@
       transform: translateY(-4px);
       box-shadow: 0 12px 48px rgba(0, 0, 0, 0.3);
       border-color: rgba(255, 255, 255, 0.3);
-      animation: glow 2s ease-in-out infinite;
     }
 
     .card-title {
@@ -464,13 +463,14 @@
     .temp-hot { background: rgba(249, 115, 22, 0.3); border: 1px solid rgba(249, 115, 22, 0.5); color: #fb923c; }
     .temp-critical { background: rgba(239, 68, 68, 0.3); border: 1px solid rgba(239, 68, 68, 0.5); color: #f87171; }
 
-    @keyframes fadeIn {
-      from { opacity: 0.5; }
-      to { opacity: 1; }
+    @keyframes subtleUpdate {
+      0% { opacity: 1; }
+      50% { opacity: 0.95; }
+      100% { opacity: 1; }
     }
 
-    .updating {
-      animation: fadeIn 0.3s ease-in-out;
+    .stat-value.updating {
+      animation: subtleUpdate 0.3s ease-in-out;
     }
   </style>
 </head>
@@ -640,10 +640,6 @@
         if (!response.ok) return;
 
         const data = await response.json();
-
-        // Add fade animation
-        document.body.classList.add('updating');
-        setTimeout(() => document.body.classList.remove('updating'), 300);
 
         // Update all fields
         updateTempDisplay(data.temp_c);
